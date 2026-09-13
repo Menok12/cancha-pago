@@ -1,0 +1,12 @@
+{
+  "name": "canchapago",
+  "version": "1.0.0",
+  "description": "Organizador de partidos de futbol y cobros con Mercado Pago",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["futbol", "pagos", "mercadopago"],
+  "author": "",
+  "license": "ISC"
+}
