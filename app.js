@@ -6,6 +6,8 @@ let state = {
   place: "Canchas La Redonda - Cancha 5",
   datetime: "Viernes 20:00 hs",
   totalCost: 30000,
+  minPlayers: 14,
+  fixedQuota: 0,
   currency: "ARS",
   hasMercadoPagoToken: false,
   hasPaymentLink: false,
@@ -97,7 +99,10 @@ function applyRemoteData(remoteData) {
   state.place = remoteData.place || state.place;
   state.datetime = remoteData.datetime || state.datetime;
   state.totalCost = remoteData.totalCost !== undefined ? remoteData.totalCost : state.totalCost;
+  state.minPlayers = remoteData.minPlayers !== undefined ? Number(remoteData.minPlayers) : (state.minPlayers || 14);
+  state.fixedQuota = remoteData.fixedQuota !== undefined ? Number(remoteData.fixedQuota) : (state.fixedQuota || 0);
   state.currency = remoteData.currency || 'ARS';
+  state.mpPaymentLink = remoteData.mpPaymentLink || state.mpPaymentLink || '';
   state.hasMercadoPagoToken = Boolean(remoteData.hasMercadoPagoToken);
   state.hasPaymentLink = Boolean(remoteData.hasPaymentLink);
   state.isReadyForRealPayments = Boolean(remoteData.isReadyForRealPayments);
@@ -214,17 +219,44 @@ function formatCurrency(amount) {
 }
 
 function calculateMetrics(st) {
+  const minPlayers = Math.max(1, Number(st.minPlayers) || 14);
   const totalPlayers = st.players.length;
-  const quota = totalPlayers > 0 ? Math.ceil(st.totalCost / totalPlayers) : 0;
+
+  let quota = 0;
+  if (st.fixedQuota && Number(st.fixedQuota) > 0) {
+    quota = Number(st.fixedQuota);
+  } else {
+    // División exacta según los jugadores que hayan anotados
+    quota = totalPlayers > 0 ? Math.ceil(st.totalCost / totalPlayers) : 0;
+  }
+
   const paidPlayers = st.players.filter(p => p.paid);
   const paidCount = paidPlayers.length;
   const pendingCount = totalPlayers - paidCount;
 
   const collected = paidCount * quota;
   const remaining = Math.max(0, st.totalCost - collected);
+  const surplus = Math.max(0, collected - st.totalCost);
   const percent = st.totalCost > 0 ? Math.min(100, Math.round((collected / st.totalCost) * 100)) : 0;
 
-  return { quota, totalPlayers, paidCount, pendingCount, collected, remaining, percent };
+  const startersCount = Math.min(totalPlayers, minPlayers);
+  const startersNeeded = Math.max(0, minPlayers - totalPlayers);
+  const benchCount = Math.max(0, totalPlayers - minPlayers);
+
+  return {
+    quota,
+    totalPlayers,
+    paidCount,
+    pendingCount,
+    collected,
+    remaining,
+    surplus,
+    percent,
+    minPlayers,
+    startersCount,
+    startersNeeded,
+    benchCount
+  };
 }
 
 // -------------------------------------------------------------
@@ -236,6 +268,54 @@ function render() {
   document.getElementById('hero-place').textContent = state.place || 'Cancha a confirmar';
   document.getElementById('hero-datetime').textContent = state.datetime || 'Horario a confirmar';
   document.getElementById('hero-quota').textContent = formatCurrency(metrics.quota);
+
+  const heroDivisionDetail = document.getElementById('hero-division-detail');
+  if (heroDivisionDetail) {
+    if (state.fixedQuota && Number(state.fixedQuota) > 0) {
+      heroDivisionDetail.textContent = 'Cuota fija personalizada';
+    } else if (metrics.totalPlayers > 0) {
+      heroDivisionDetail.textContent = `(${formatCurrency(state.totalCost)} ÷ ${metrics.totalPlayers} ${metrics.totalPlayers === 1 ? 'anotado' : 'anotados'})`;
+    } else {
+      heroDivisionDetail.textContent = `(${formatCurrency(state.totalCost)} total)`;
+    }
+  }
+
+  const heroMinPlayers = document.getElementById('hero-min-players');
+  if (heroMinPlayers) {
+    heroMinPlayers.textContent = `${metrics.minPlayers} jugadores`;
+  }
+
+  const heroTeamStatus = document.getElementById('hero-team-status');
+  const heroBenchBadge = document.getElementById('hero-bench-badge');
+  if (heroTeamStatus) {
+    if (metrics.startersNeeded > 0) {
+      heroTeamStatus.className = 'flex items-center gap-1.5 text-amber-400 font-semibold';
+      heroTeamStatus.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i><span>Faltan <strong>${metrics.startersNeeded}</strong> para los ${metrics.minPlayers} titulares (van ${metrics.totalPlayers}/${metrics.minPlayers})</span>`;
+      if (heroBenchBadge) heroBenchBadge.classList.add('hidden');
+    } else {
+      heroTeamStatus.className = 'flex items-center gap-1.5 text-emerald-400 font-semibold';
+      heroTeamStatus.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i><span>¡${metrics.minPlayers} Titulares completos!</span>`;
+      if (heroBenchBadge) {
+        if (metrics.benchCount > 0) {
+          heroBenchBadge.textContent = `+${metrics.benchCount} en banca`;
+          heroBenchBadge.classList.remove('hidden');
+        } else {
+          heroBenchBadge.classList.add('hidden');
+        }
+      }
+    }
+  }
+
+  const surplusContainer = document.getElementById('hero-surplus-container');
+  const surplusAmount = document.getElementById('hero-surplus-amount');
+  if (surplusContainer && surplusAmount) {
+    if (metrics.surplus > 0) {
+      surplusContainer.classList.remove('hidden');
+      surplusAmount.textContent = `+${formatCurrency(metrics.surplus)}`;
+    } else {
+      surplusContainer.classList.add('hidden');
+    }
+  }
 
   document.getElementById('hero-progress-text').textContent = `${metrics.paidCount} de ${metrics.totalPlayers} pagaron`;
   document.getElementById('hero-remaining-text').textContent = metrics.remaining > 0 
@@ -254,16 +334,19 @@ function render() {
   document.getElementById('count-pending').textContent = metrics.pendingCount;
   document.getElementById('count-paid').textContent = metrics.paidCount;
 
-  renderPlayers(metrics.quota);
+  renderPlayers(metrics);
 
   if (window.lucide) {
     lucide.createIcons();
   }
 }
 
-function renderPlayers(quota) {
+function renderPlayers(metrics) {
   const container = document.getElementById('players-list');
   if (!container) return;
+
+  const quota = metrics.quota;
+  const minPlayers = metrics.minPlayers;
 
   let filtered = state.players;
   if (state.currentFilter === 'pending') {
@@ -293,21 +376,45 @@ function renderPlayers(quota) {
   }
 
   let html = '';
+  let showedBenchHeader = false;
+
   filtered.forEach((p, idx) => {
+    // Posición original en state.players
+    const originalIndex = state.players.findIndex(x => x.id === p.id);
+    const isStarter = originalIndex < minPlayers;
     const isPaid = p.paid;
     const initial = (p.name || '?').charAt(0).toUpperCase();
 
+    // Separador de banca cuando mostramos 'Todos'
+    if (!isStarter && !showedBenchHeader && state.currentFilter === 'all') {
+      showedBenchHeader = true;
+      html += `
+        <div class="pt-4 pb-2 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-sm">🪑</span>
+            <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">En Banca / Suplentes</span>
+          </div>
+          <span class="text-[10px] text-slate-400 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded-lg">Entran si se baja un titular</span>
+        </div>
+      `;
+    }
+
+    const badgeRole = isStarter 
+      ? `<span class="text-[10px] text-emerald-400 font-semibold bg-emerald-950/70 border border-emerald-800/60 px-1.5 py-0.5 rounded">Titular #${originalIndex + 1}</span>`
+      : `<span class="text-[10px] text-amber-400 font-semibold bg-amber-950/70 border border-amber-800/60 px-1.5 py-0.5 rounded">Banca #${originalIndex - minPlayers + 1}</span>`;
+
     html += `
-      <div class="player-row bg-[#121a24] border border-slate-800/90 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
+      <div class="player-row bg-[#121a24] border ${isStarter ? 'border-slate-800/90' : 'border-amber-900/50 bg-gradient-to-r from-[#121a24] to-[#1a1713]'} rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
         
         <!-- Avatar y Nombre -->
         <div class="flex items-center gap-3 min-w-0 flex-1">
-          <div class="w-9 h-9 rounded-xl ${isPaid ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-300 border border-slate-700'} flex items-center justify-center font-bold text-xs shrink-0">
+          <div class="w-9 h-9 rounded-xl ${isPaid ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : (isStarter ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-amber-950/50 text-amber-300 border border-amber-800/40')} flex items-center justify-center font-bold text-xs shrink-0">
             ${isPaid ? '✓' : initial}
           </div>
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-sm text-white truncate">${escapeHtml(p.name)}</span>
+              ${badgeRole}
               ${p.transactionId ? `<span class="text-[9px] font-mono text-emerald-400 hidden sm:inline">#${p.transactionId}</span>` : ''}
             </div>
             <span class="text-[11px] ${isPaid ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}">
@@ -530,18 +637,27 @@ function generateWhatsAppText() {
   let msg = `⚽ *FÚTBOL CON AMIGOS* ⚽\n`;
   msg += `📍 *Cancha:* ${state.place}\n`;
   msg += `⏰ *Hora:* ${state.datetime}\n`;
-  msg += `💸 *Cuota:* ${quotaStr} por persona\n\n`;
+  msg += `💸 *Cuota:* ${quotaStr} por persona\n`;
+  if (metrics.startersNeeded > 0) {
+    msg += `⚠️ *Convocatoria:* Faltan ${metrics.startersNeeded} para los ${metrics.minPlayers} titulares (van ${metrics.totalPlayers}/${metrics.minPlayers})\n\n`;
+  } else {
+    msg += `🔥 *Convocatoria:* ¡${metrics.minPlayers} Titulares completos! ${metrics.benchCount > 0 ? `(+${metrics.benchCount} en banca)` : ''}\n\n`;
+  }
 
   msg += `📋 *ESTADO DE PAGOS (${metrics.paidCount}/${metrics.totalPlayers}):*\n`;
   state.players.forEach((p, i) => {
+    const isStarter = i < metrics.minPlayers;
+    const roleTag = isStarter ? `[Titular ${i + 1}]` : `[Banca ${i - metrics.minPlayers + 1}]`;
     const icon = p.paid ? '✅' : '❌';
     const status = p.paid ? 'PAGADO' : `DEBE ${quotaStr}`;
-    msg += `${icon} ${i + 1}. ${p.name} - ${status}\n`;
+    msg += `${icon} ${i + 1}. ${p.name} ${roleTag} - ${status}\n`;
   });
 
   msg += `\n`;
   msg += `💰 *Recaudado:* ${formatCurrency(metrics.collected)} de ${formatCurrency(state.totalCost)}\n`;
-  if (metrics.remaining > 0) {
+  if (metrics.surplus > 0) {
+    msg += `🍻 *Fondo bebidas / tercer tiempo:* +${formatCurrency(metrics.surplus)}\n`;
+  } else if (metrics.remaining > 0) {
     msg += `⚠️ *Faltan juntar:* ${formatCurrency(metrics.remaining)}\n`;
   } else {
     msg += `🎉 *¡Cancha totalmente cubierta!*\n`;
@@ -688,6 +804,8 @@ function setupEventListeners() {
     document.getElementById('admin-input-place').value = state.place;
     document.getElementById('admin-input-datetime').value = state.datetime;
     document.getElementById('admin-input-total-cost').value = state.totalCost;
+    document.getElementById('admin-input-min-players').value = state.minPlayers || 14;
+    document.getElementById('admin-input-fixed-quota').value = state.fixedQuota ? state.fixedQuota : '';
     modalEdit.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   });
@@ -700,7 +818,9 @@ function setupEventListeners() {
     const payload = {
       place: document.getElementById('admin-input-place').value.trim(),
       datetime: document.getElementById('admin-input-datetime').value.trim(),
-      totalCost: parseFloat(document.getElementById('admin-input-total-cost').value) || 0
+      totalCost: parseFloat(document.getElementById('admin-input-total-cost').value) || 0,
+      minPlayers: parseInt(document.getElementById('admin-input-min-players').value) || 14,
+      fixedQuota: parseFloat(document.getElementById('admin-input-fixed-quota').value) || 0
     };
 
     try {

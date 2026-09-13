@@ -14,6 +14,8 @@ const INITIAL_DATA = {
   place: "Canchas La Redonda - Cancha 5",
   datetime: "Viernes 20:00 hs",
   totalCost: 30000,
+  minPlayers: 14, // Mínimo de titulares requeridos
+  fixedQuota: 0, // Cuota fija personalizada por persona (si es 0, divide totalCost entre minPlayers)
   currency: "ARS",
   mpAccessToken: "", // Access Token de Mercado Pago (APP_USR-... o TEST-...)
   mpPaymentLink: "", // O Link de Pago de Mercado Pago (https://mpago.la/...)
@@ -38,6 +40,8 @@ function loadData() {
       const parsed = JSON.parse(raw);
       if (!parsed.adminPassword) parsed.adminPassword = "admin123";
       if (!parsed.currency) parsed.currency = "ARS";
+      if (!parsed.minPlayers) parsed.minPlayers = 14;
+      if (parsed.fixedQuota === undefined) parsed.fixedQuota = 0;
       return parsed;
     }
   } catch (e) {
@@ -104,9 +108,12 @@ function getLocalIp() {
 }
 
 function getQuota() {
-  const total = matchData.players.length;
-  if (total === 0) return 0;
-  return Math.ceil(matchData.totalCost / total);
+  if (matchData.fixedQuota && Number(matchData.fixedQuota) > 0) {
+    return Number(matchData.fixedQuota);
+  }
+  const count = matchData.players.length;
+  if (count === 0) return 0;
+  return Math.ceil(matchData.totalCost / count);
 }
 
 // -------------------------------------------------------------
@@ -490,6 +497,8 @@ const server = http.createServer(async (req, res) => {
         if (update.place !== undefined) matchData.place = update.place;
         if (update.datetime !== undefined) matchData.datetime = update.datetime;
         if (update.totalCost !== undefined) matchData.totalCost = Number(update.totalCost);
+        if (update.minPlayers !== undefined) matchData.minPlayers = Math.max(1, Number(update.minPlayers) || 14);
+        if (update.fixedQuota !== undefined) matchData.fixedQuota = Math.max(0, Number(update.fixedQuota) || 0);
 
         saveData(matchData);
         broadcastUpdate();

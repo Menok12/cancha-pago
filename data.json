@@ -6,17 +6,6 @@
   "bankHolder": "Lucas (Mercado Pago)",
   "players": [
     {
-      "id": "1",
-      "name": "Lucas",
-      "paid": false
-    },
-    {
-      "id": "2",
-      "name": "Martín",
-      "paid": false,
-      "cardLastFour": "8821"
-    },
-    {
       "id": "3",
       "name": "Nico",
       "paid": false,
@@ -71,10 +60,17 @@
       "id": "1789259225587-esve",
       "name": "asdasdasd",
       "paid": false
+    },
+    {
+      "id": "1789260874380-yywr",
+      "name": "Agustin",
+      "paid": false
     }
   ],
   "adminPassword": "admin123",
   "currency": "CLP",
+  "minPlayers": 14,
+  "fixedQuota": 0,
   "mpPaymentLink": "https://mpago.la/2ASSSnh",
   "mpAccessToken": ""
 }
