@@ -8,6 +8,8 @@ let state = {
   totalCost: 30000,
   minPlayers: 14,
   fixedQuota: 0,
+  forcePaymentsOpen: false,
+  paymentsUnlocked: false,
   currency: "ARS",
   hasMercadoPagoToken: false,
   hasPaymentLink: false,
@@ -103,10 +105,22 @@ function applyRemoteData(remoteData) {
   state.fixedQuota = remoteData.fixedQuota !== undefined ? Number(remoteData.fixedQuota) : (state.fixedQuota || 0);
   state.currency = remoteData.currency || 'ARS';
   state.mpPaymentLink = remoteData.mpPaymentLink || state.mpPaymentLink || '';
+  state.forcePaymentsOpen = Boolean(remoteData.forcePaymentsOpen);
   state.hasMercadoPagoToken = Boolean(remoteData.hasMercadoPagoToken);
   state.hasPaymentLink = Boolean(remoteData.hasPaymentLink);
   state.isReadyForRealPayments = Boolean(remoteData.isReadyForRealPayments);
   state.players = Array.isArray(remoteData.players) ? remoteData.players : state.players;
+
+  const minReq = state.minPlayers || 14;
+  const prevUnlocked = state.paymentsUnlocked;
+  state.paymentsUnlocked = (state.players.length >= minReq) || state.forcePaymentsOpen;
+
+  // Celebración cuando se llega a los 14 y se desbloquean los cobros
+  if (!prevUnlocked && state.paymentsUnlocked && state.players.length >= minReq) {
+    fireConfetti();
+    playSound('goal');
+    showToast('🎉 ¡14 jugadores inscritos! Casillas de pago habilitadas', '⚽');
+  }
 
   const newMetrics = calculateMetrics(state);
 
@@ -334,6 +348,31 @@ function render() {
   document.getElementById('count-pending').textContent = metrics.pendingCount;
   document.getElementById('count-paid').textContent = metrics.paidCount;
 
+  // Actualizar banner dinámico de bloqueo/desbloqueo de pagos
+  const lockBanner = document.getElementById('payments-lock-banner');
+  const lockIcon = document.getElementById('lock-banner-icon');
+  const lockTitle = document.getElementById('lock-banner-title');
+  const lockText = document.getElementById('lock-banner-text');
+
+  if (lockBanner) {
+    if (state.paymentsUnlocked) {
+      lockBanner.className = 'bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-3 text-xs text-emerald-200 flex items-center gap-3 shadow-md';
+      if (lockIcon) lockIcon.textContent = '⚽';
+      if (lockTitle) lockTitle.textContent = '¡14 jugadores completados! Pagos habilitados:';
+      if (lockText) lockText.innerHTML = `La convocatoria llegó a la meta. Toca tu botón para pagar la cuota de <strong>${formatCurrency(metrics.quota)}</strong> por Mercado Pago 🟢.`;
+    } else {
+      lockBanner.className = 'bg-amber-950/40 border border-amber-800/60 rounded-2xl p-3 text-xs text-amber-200 flex items-center gap-3';
+      if (lockIcon) lockIcon.textContent = '🔒';
+      if (lockTitle) lockTitle.textContent = `Cobros pausados hasta completar ${metrics.minPlayers} jugadores:`;
+      if (lockText) lockText.innerHTML = `Para que nadie pague de más, los cobros se activarán cuando seamos <strong>${metrics.minPlayers} inscritos</strong> (van <span class="font-bold text-amber-300">${metrics.totalPlayers}</span> de ${metrics.minPlayers}).`;
+    }
+  }
+
+  const labelForcePay = document.getElementById('label-admin-force-pay');
+  if (labelForcePay) {
+    labelForcePay.textContent = state.paymentsUnlocked ? 'Pausar Cobros' : 'Habilitar Cobros';
+  }
+
   renderPlayers(metrics);
 
   if (window.lucide) {
@@ -423,7 +462,7 @@ function renderPlayers(metrics) {
           </div>
         </div>
 
-        <!-- Botón de Pago Rojo / Verde -->
+        <!-- Botón de Pago Rojo / Verde / Bloqueado -->
         <div class="flex items-center gap-1.5 shrink-0">
           
           ${isPaid ? `
@@ -432,8 +471,8 @@ function renderPlayers(metrics) {
               <span>PAGADO</span>
               <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
             </div>
-          ` : `
-            <!-- BOTÓN ROJO (ABRE MODAL DE MERCADO PAGO OFICIAL) -->
+          ` : (state.paymentsUnlocked ? `
+            <!-- BOTÓN ROJO HABILITADO (ABRE MODAL DE MERCADO PAGO OFICIAL) -->
             <button 
               onclick="openPayModal('${p.id}')" 
               class="btn-action-pay px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 active:scale-95 shadow-md shadow-red-500/20"
@@ -442,7 +481,17 @@ function renderPlayers(metrics) {
               <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
               <span>Pagar ${formatCurrency(quota)}</span>
             </button>
-          `}
+          ` : `
+            <!-- BOTÓN BLOQUEADO HASTA COMPLETAR 14 JUGADORES -->
+            <button 
+              onclick="alertPaymentsLocked()" 
+              class="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-800 text-slate-400 border border-slate-700/80 hover:border-amber-500/40 hover:text-amber-300 transition flex items-center gap-1.5 active:scale-95"
+              title="Los cobros se activarán cuando seamos 14 jugadores"
+            >
+              <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-400"></i>
+              <span>Esperando 14 (${state.players.length}/${minPlayers})</span>
+            </button>
+          `)}
 
           <!-- CONTROLES EXCLUSIVOS DE ADMINISTRADOR -->
           ${isAdmin ? `
@@ -494,7 +543,19 @@ function escapeHtml(str) {
 // -------------------------------------------------------------
 // FLUJO DE PAGO: MERCADO PAGO OFICIAL
 // -------------------------------------------------------------
+window.alertPaymentsLocked = function() {
+  const minReq = state.minPlayers || 14;
+  const count = state.players.length;
+  const missing = Math.max(0, minReq - count);
+  showToast(`🔒 Faltan ${missing} jugadores para habilitar pagos (van ${count} de ${minReq})`, '⏳');
+};
+
 window.openPayModal = async function(playerId) {
+  if (!state.paymentsUnlocked) {
+    alertPaymentsLocked();
+    return;
+  }
+
   const player = state.players.find(p => p.id === playerId);
   if (!player) return;
 
@@ -857,6 +918,30 @@ function setupEventListeners() {
       }
     } catch (e) {}
   });
+
+  // Botón forzar/pausar cobros (Admin)
+  const btnToggleForce = document.getElementById('btn-admin-toggle-force-pay');
+  if (btnToggleForce) {
+    btnToggleForce.addEventListener('click', async () => {
+      const nextVal = !state.paymentsUnlocked;
+      const msg = nextVal 
+        ? '¿Quieres HABILITAR los cobros ahora para todos (aunque no se hayan completado los 14 jugadores)?' 
+        : '¿Quieres PAUSAR los cobros hasta que se completen los 14 jugadores?';
+      if (!confirm(msg)) return;
+
+      try {
+        const res = await adminFetch('/api/admin/match', {
+          method: 'POST',
+          body: JSON.stringify({ forcePaymentsOpen: nextVal })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(nextVal ? 'Cobros habilitados para todos 🔓' : 'Cobros pausados hasta llegar a 14 🔒', '⚡');
+          applyRemoteData(data.matchData);
+        }
+      } catch (e) {}
+    });
+  }
 
   // Modal Agregar Amigo
   const modalAdd = document.getElementById('modal-add-player');

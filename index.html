@@ -73,6 +73,10 @@
           <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
           <span>Amigo</span>
         </button>
+        <button id="btn-admin-toggle-force-pay" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg transition flex items-center gap-1" title="Habilitar o pausar cobros manualmente">
+          <i data-lucide="unlock" class="w-3.5 h-3.5"></i>
+          <span id="label-admin-force-pay">Habilitar Pagos</span>
+        </button>
         <button id="btn-admin-change-pass" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2 py-1 rounded-lg transition" title="Cambiar clave">
           <i data-lucide="key" class="w-3.5 h-3.5"></i>
         </button>
@@ -166,10 +170,13 @@
         </div>
       </div>
 
-      <!-- Guía informativa -->
-      <div class="bg-blue-950/30 border border-blue-800/40 rounded-2xl p-3 text-xs text-blue-300 flex items-center gap-2.5">
-        <span class="text-lg">💙</span>
-        <span class="leading-relaxed">Toca tu botón para pagar mediante <strong>Mercado Pago</strong> con dinero en cuenta, débito o crédito. <strong>Al confirmarse el pago real, tu botón pasará a verde 🟢.</strong></span>
+      <!-- Guía informativa dinámica según si los pagos están bloqueados o abiertos -->
+      <div id="payments-lock-banner" class="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-3 text-xs text-amber-200 flex items-center gap-3">
+        <span id="lock-banner-icon" class="text-xl shrink-0">🔒</span>
+        <div class="leading-relaxed">
+          <strong id="lock-banner-title" class="text-white block font-bold">Cobros en pausa hasta completar 14 jugadores:</strong>
+          <span id="lock-banner-text">Para que nadie pague de más, las casillas de pago se activarán automáticamente cuando seamos 14 inscritos (van <span id="lock-banner-count" class="font-bold text-amber-300">0</span> de 14).</span>
+        </div>
       </div>
 
       <!-- CAJA DE AUTO-INSCRIPCIÓN PARA AMIGOS -->

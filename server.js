@@ -15,7 +15,8 @@ const INITIAL_DATA = {
   datetime: "Viernes 20:00 hs",
   totalCost: 30000,
   minPlayers: 14, // Mínimo de titulares requeridos
-  fixedQuota: 0, // Cuota fija personalizada por persona (si es 0, divide totalCost entre minPlayers)
+  fixedQuota: 0, // Cuota fija personalizada por persona (si es 0, divide totalCost entre anotados)
+  forcePaymentsOpen: false, // Permitir pagos antes de los 14 si el admin lo fuerza manualmente
   currency: "ARS",
   mpAccessToken: "", // Access Token de Mercado Pago (APP_USR-... o TEST-...)
   mpPaymentLink: "", // O Link de Pago de Mercado Pago (https://mpago.la/...)
@@ -42,6 +43,7 @@ function loadData() {
       if (!parsed.currency) parsed.currency = "ARS";
       if (!parsed.minPlayers) parsed.minPlayers = 14;
       if (parsed.fixedQuota === undefined) parsed.fixedQuota = 0;
+      if (parsed.forcePaymentsOpen === undefined) parsed.forcePaymentsOpen = false;
       return parsed;
     }
   } catch (e) {
@@ -80,6 +82,8 @@ function getPublicData() {
   safeData.hasMercadoPagoToken = Boolean(matchData.mpAccessToken && matchData.mpAccessToken.trim().length > 10);
   safeData.hasPaymentLink = Boolean(matchData.mpPaymentLink && matchData.mpPaymentLink.trim().startsWith('http'));
   safeData.isReadyForRealPayments = safeData.hasMercadoPagoToken || safeData.hasPaymentLink;
+  const minReq = Number(matchData.minPlayers) || 14;
+  safeData.paymentsUnlocked = (matchData.players.length >= minReq) || Boolean(matchData.forcePaymentsOpen);
   return safeData;
 }
 
@@ -125,14 +129,17 @@ function createMercadoPagoPreference(player, host) {
   return new Promise((resolve, reject) => {
     const quota = getQuota();
 
-    const preferencePayload = JSON.stringify({
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const protocol = isLocal ? 'http' : 'https';
+
+    const preferenceObj = {
       items: [
         {
           id: `cuota-${player.id}`,
           title: `Fútbol - Cuota de ${player.name}`,
           description: `Cuota para el partido en ${matchData.place} (${matchData.datetime})`,
           quantity: 1,
-          currency_id: matchData.currency || 'ARS',
+          currency_id: matchData.currency || 'CLP',
           unit_price: Number(quota)
         }
       ],
@@ -140,14 +147,19 @@ function createMercadoPagoPreference(player, host) {
         name: player.name
       },
       external_reference: player.id,
-      back_urls: {
-        success: `http://${host}/payment/success?playerId=${player.id}`,
-        failure: `http://${host}/payment/failure?playerId=${player.id}`,
-        pending: `http://${host}/payment/pending?playerId=${player.id}`
-      },
-      auto_return: 'approved',
       statement_descriptor: 'FUTBOL CUOTA'
-    });
+    };
+
+    if (!isLocal) {
+      preferenceObj.back_urls = {
+        success: `${protocol}://${host}/payment/success?playerId=${player.id}`,
+        failure: `${protocol}://${host}/payment/failure?playerId=${player.id}`,
+        pending: `${protocol}://${host}/payment/pending?playerId=${player.id}`
+      };
+      preferenceObj.auto_return = 'approved';
+    }
+
+    const preferencePayload = JSON.stringify(preferenceObj);
 
     const options = {
       hostname: 'api.mercadopago.com',
@@ -273,6 +285,16 @@ const server = http.createServer(async (req, res) => {
         if (!player) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Jugador no encontrado' }));
+          return;
+        }
+
+        const minReq = Number(matchData.minPlayers) || 14;
+        const paymentsUnlocked = (matchData.players.length >= minReq) || Boolean(matchData.forcePaymentsOpen);
+        if (!paymentsUnlocked) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            error: `Los pagos están pausados hasta que se completen los ${minReq} jugadores anotados (van ${matchData.players.length}/${minReq}).` 
+          }));
           return;
         }
 
@@ -499,6 +521,7 @@ const server = http.createServer(async (req, res) => {
         if (update.totalCost !== undefined) matchData.totalCost = Number(update.totalCost);
         if (update.minPlayers !== undefined) matchData.minPlayers = Math.max(1, Number(update.minPlayers) || 14);
         if (update.fixedQuota !== undefined) matchData.fixedQuota = Math.max(0, Number(update.fixedQuota) || 0);
+        if (update.forcePaymentsOpen !== undefined) matchData.forcePaymentsOpen = Boolean(update.forcePaymentsOpen);
 
         saveData(matchData);
         broadcastUpdate();
