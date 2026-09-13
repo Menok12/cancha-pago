@@ -325,6 +325,48 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 3b. POST /api/player/join: Auto-anotarse al partido (Público para amigos)
+  if (pathname === '/api/player/join' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { name } = JSON.parse(body);
+        const trimmed = (name || '').trim();
+        if (!trimmed || trimmed.length < 2) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Escribe tu nombre para anotarte (mínimo 2 letras)' }));
+          return;
+        }
+
+        // Evitar duplicados
+        const exists = matchData.players.find(p => p.name.toLowerCase() === trimmed.toLowerCase());
+        if (exists) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Ya hay alguien anotado como "${trimmed}". Agrega tu apellido o apodo.` }));
+          return;
+        }
+
+        const newPlayer = {
+          id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 4),
+          name: trimmed,
+          paid: false
+        };
+
+        matchData.players.push(newPlayer);
+        saveData(matchData);
+        broadcastUpdate();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, player: newPlayer, matchData: getPublicData() }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'JSON inválido' }));
+      }
+    });
+    return;
+  }
+
   // 4. GET /payment/success: Retorno oficial de Mercado Pago
   if (pathname === '/payment/success' && req.method === 'GET') {
     const playerId = parsedUrl.searchParams.get('playerId') || parsedUrl.searchParams.get('external_reference');

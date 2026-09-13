@@ -272,6 +272,17 @@ function renderPlayers(quota) {
     filtered = state.players.filter(p => p.paid);
   }
 
+  if (state.players.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-8 px-4 bg-[#121a24] rounded-2xl border border-dashed border-slate-800 space-y-1.5">
+        <span class="text-2xl block">⚽</span>
+        <h4 class="text-sm font-bold text-white">Aún no hay nadie anotado</h4>
+        <p class="text-xs text-slate-400 max-w-xs mx-auto">Escribe tu nombre en la caja de arriba y sé el primero en sumarte al partido.</p>
+      </div>
+    `;
+    return;
+  }
+
   if (filtered.length === 0) {
     container.innerHTML = `
       <div class="text-center py-6 text-xs text-slate-500 bg-[#121a24] rounded-2xl border border-slate-800">
@@ -555,6 +566,37 @@ function copySummary() {
 // LISTENERS Y SETUP
 // -------------------------------------------------------------
 function setupEventListeners() {
+  // Auto-anotarse al partido (Amigos)
+  const formSelfJoin = document.getElementById('form-self-join');
+  const inputSelfName = document.getElementById('input-self-name');
+
+  if (formSelfJoin) {
+    formSelfJoin.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = inputSelfName.value.trim();
+      if (!name) return;
+
+      try {
+        const res = await fetch('/api/player/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          inputSelfName.value = '';
+          showToast(`¡${name} te anotaste al partido! ⚽`, '👤');
+          applyRemoteData(data.matchData);
+        } else {
+          alert(data.error || 'No se pudo anotar');
+        }
+      } catch (err) {
+        showToast('Error de conexión', '⚠️');
+      }
+    });
+  }
+
   // Modal de pago
   document.getElementById('btn-close-modal-pay').addEventListener('click', closePayModal);
 
