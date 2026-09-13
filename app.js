@@ -6,6 +6,8 @@ let state = {
   place: "Canchas La Redonda - Cancha 5",
   datetime: "Viernes 20:00 hs",
   totalCost: 30000,
+  discountFromPrevious: 0,
+  reserveFund: 0,
   minPlayers: 14,
   fixedQuota: 0,
   forcePaymentsOpen: false,
@@ -103,6 +105,8 @@ function applyRemoteData(remoteData) {
   state.totalCost = remoteData.totalCost !== undefined ? remoteData.totalCost : state.totalCost;
   state.minPlayers = remoteData.minPlayers !== undefined ? Number(remoteData.minPlayers) : (state.minPlayers || 14);
   state.fixedQuota = remoteData.fixedQuota !== undefined ? Number(remoteData.fixedQuota) : (state.fixedQuota || 0);
+  state.discountFromPrevious = remoteData.discountFromPrevious !== undefined ? Number(remoteData.discountFromPrevious) : 0;
+  state.reserveFund = remoteData.reserveFund !== undefined ? Number(remoteData.reserveFund) : 0;
   state.currency = remoteData.currency || 'ARS';
   state.mpPaymentLink = remoteData.mpPaymentLink || state.mpPaymentLink || '';
   state.forcePaymentsOpen = Boolean(remoteData.forcePaymentsOpen);
@@ -235,23 +239,38 @@ function formatCurrency(amount) {
 function calculateMetrics(st) {
   const minPlayers = Math.max(1, Number(st.minPlayers) || 14);
   const totalPlayers = st.players.length;
+  const discountFromPrevious = Number(st.discountFromPrevious) || 0;
+  const netCost = Math.max(0, (Number(st.totalCost) || 0) - discountFromPrevious);
 
   let quota = 0;
   if (st.fixedQuota && Number(st.fixedQuota) > 0) {
     quota = Number(st.fixedQuota);
   } else {
-    // División exacta según los jugadores que hayan anotados
-    quota = totalPlayers > 0 ? Math.ceil(st.totalCost / totalPlayers) : 0;
+    // La cuota de los titulares siempre se divide entre los 14 requeridos
+    quota = minPlayers > 0 ? Math.ceil(netCost / minPlayers) : 0;
   }
 
-  const paidPlayers = st.players.filter(p => p.paid);
-  const paidCount = paidPlayers.length;
+  const starters = st.players.slice(0, minPlayers);
+  const bench = st.players.slice(minPlayers);
+
+  const startersPaid = starters.filter(p => p.paid);
+  const benchPaid = bench.filter(p => p.paid);
+
+  const startersPaidCount = startersPaid.length;
+  const benchPaidCount = benchPaid.length;
+  const paidCount = startersPaidCount + benchPaidCount;
   const pendingCount = totalPlayers - paidCount;
 
-  const collected = paidCount * quota;
-  const remaining = Math.max(0, st.totalCost - collected);
-  const surplus = Math.max(0, collected - st.totalCost);
-  const percent = st.totalCost > 0 ? Math.min(100, Math.round((collected / st.totalCost) * 100)) : 0;
+  // Recaudación para pagar la cancha actual
+  const collectedForCourt = startersPaid.reduce((sum, p) => sum + (Number(p.paidAmount) || quota), 0);
+  const remaining = Math.max(0, netCost - collectedForCourt);
+
+  // Fondo de reserva acumulado por suplentes (jugadores 15, 16, etc. que pagaron)
+  const dynamicReserve = benchPaid.reduce((sum, p) => sum + (Number(p.paidAmount) || quota), 0);
+  const reserveFund = Math.max(dynamicReserve, Number(st.reserveFund) || 0);
+
+  const surplus = Math.max(0, collectedForCourt - netCost);
+  const percent = netCost > 0 ? Math.min(100, Math.round((collectedForCourt / netCost) * 100)) : 0;
 
   const startersCount = Math.min(totalPlayers, minPlayers);
   const startersNeeded = Math.max(0, minPlayers - totalPlayers);
@@ -259,10 +278,15 @@ function calculateMetrics(st) {
 
   return {
     quota,
+    netCost,
+    discountFromPrevious,
+    reserveFund,
     totalPlayers,
     paidCount,
     pendingCount,
-    collected,
+    startersPaidCount,
+    benchPaidCount,
+    collected: collectedForCourt,
     remaining,
     surplus,
     percent,
@@ -283,14 +307,31 @@ function render() {
   document.getElementById('hero-datetime').textContent = state.datetime || 'Horario a confirmar';
   document.getElementById('hero-quota').textContent = formatCurrency(metrics.quota);
 
+  // Banner de Descuento aplicado por reserva previa
+  const discountBanner = document.getElementById('hero-discount-banner');
+  const discountAmount = document.getElementById('hero-discount-amount');
+  const discountDesc = document.getElementById('hero-discount-desc');
+  if (discountBanner && discountAmount) {
+    if (metrics.discountFromPrevious > 0) {
+      discountBanner.classList.remove('hidden');
+      discountAmount.textContent = `-${formatCurrency(metrics.discountFromPrevious)}`;
+      if (discountDesc) {
+        discountDesc.textContent = `Costo cancha ${formatCurrency(state.totalCost)} - Descuento reserva ${formatCurrency(metrics.discountFromPrevious)} = Neto ${formatCurrency(metrics.netCost)}`;
+      }
+    } else {
+      discountBanner.classList.add('hidden');
+    }
+  }
+
+  // Detalle bajo la cuota
   const heroDivisionDetail = document.getElementById('hero-division-detail');
   if (heroDivisionDetail) {
     if (state.fixedQuota && Number(state.fixedQuota) > 0) {
       heroDivisionDetail.textContent = 'Cuota fija personalizada';
-    } else if (metrics.totalPlayers > 0) {
-      heroDivisionDetail.textContent = `(${formatCurrency(state.totalCost)} ÷ ${metrics.totalPlayers} ${metrics.totalPlayers === 1 ? 'anotado' : 'anotados'})`;
+    } else if (metrics.discountFromPrevious > 0) {
+      heroDivisionDetail.textContent = `(${formatCurrency(metrics.netCost)} neto ÷ ${metrics.minPlayers} titulares)`;
     } else {
-      heroDivisionDetail.textContent = `(${formatCurrency(state.totalCost)} total)`;
+      heroDivisionDetail.textContent = `(${formatCurrency(state.totalCost)} total ÷ ${metrics.minPlayers} titulares)`;
     }
   }
 
@@ -320,6 +361,22 @@ function render() {
     }
   }
 
+  // Banner Fondo de Reserva Acumulado para Próximo Partido
+  const reserveBanner = document.getElementById('hero-reserve-banner');
+  const reserveAmount = document.getElementById('hero-reserve-amount');
+  const reserveCount = document.getElementById('hero-reserve-count');
+  if (reserveBanner && reserveAmount) {
+    if (metrics.reserveFund > 0) {
+      reserveBanner.classList.remove('hidden');
+      reserveAmount.textContent = `+${formatCurrency(metrics.reserveFund)}`;
+      if (reserveCount) {
+        reserveCount.textContent = `${metrics.benchPaidCount} ${metrics.benchPaidCount === 1 ? 'suplente pagó' : 'suplentes pagaron'} (se restará automáticamente del próximo partido)`;
+      }
+    } else {
+      reserveBanner.classList.add('hidden');
+    }
+  }
+
   const surplusContainer = document.getElementById('hero-surplus-container');
   const surplusAmount = document.getElementById('hero-surplus-amount');
   if (surplusContainer && surplusAmount) {
@@ -331,14 +388,14 @@ function render() {
     }
   }
 
-  document.getElementById('hero-progress-text').textContent = `${metrics.paidCount} de ${metrics.totalPlayers} pagaron`;
+  document.getElementById('hero-progress-text').textContent = `${metrics.startersPaidCount} de ${metrics.startersCount} titulares pagaron`;
   document.getElementById('hero-remaining-text').textContent = metrics.remaining > 0 
     ? `Falta ${formatCurrency(metrics.remaining)}` 
     : '¡Cancha 100% Pagada! 🎉';
 
   const progressBar = document.getElementById('hero-progress-bar');
   progressBar.style.width = metrics.percent + '%';
-  if (metrics.percent >= 100 && state.totalCost > 0) {
+  if (metrics.percent >= 100 && metrics.netCost > 0) {
     progressBar.classList.add('pulse-complete');
   } else {
     progressBar.classList.remove('pulse-complete');
@@ -440,15 +497,25 @@ function renderPlayers(metrics) {
 
     const badgeRole = isStarter 
       ? `<span class="text-[10px] text-emerald-400 font-semibold bg-emerald-950/70 border border-emerald-800/60 px-1.5 py-0.5 rounded">Titular #${originalIndex + 1}</span>`
-      : `<span class="text-[10px] text-amber-400 font-semibold bg-amber-950/70 border border-amber-800/60 px-1.5 py-0.5 rounded">Banca #${originalIndex - minPlayers + 1}</span>`;
+      : (isPaid 
+          ? `<span class="text-[10px] text-blue-300 font-semibold bg-blue-950/80 border border-blue-700/60 px-1.5 py-0.5 rounded flex items-center gap-1"><span>🎟️</span><span>Banca #${originalIndex - minPlayers + 1} (Reserva Próxima Fecha)</span></span>`
+          : `<span class="text-[10px] text-amber-400 font-semibold bg-amber-950/70 border border-amber-800/60 px-1.5 py-0.5 rounded">Banca #${originalIndex - minPlayers + 1}</span>`);
+
+    const statusText = isStarter
+      ? (isPaid ? 'Pagado ' + formatCurrency(quota) : 'Debe ' + formatCurrency(quota))
+      : (isPaid ? 'Pagado ' + formatCurrency(quota) + ' (Fondo de Reserva)' : 'Cuota ' + formatCurrency(quota) + ' (Fondo Reserva)');
+
+    const statusColor = isPaid 
+      ? (isStarter ? 'text-emerald-400 font-medium' : 'text-blue-400 font-medium')
+      : (isStarter ? 'text-rose-400 font-medium' : 'text-amber-400/90 font-medium');
 
     html += `
-      <div class="player-row bg-[#121a24] border ${isStarter ? 'border-slate-800/90' : 'border-amber-900/50 bg-gradient-to-r from-[#121a24] to-[#1a1713]'} rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
+      <div class="player-row bg-[#121a24] border ${isStarter ? 'border-slate-800/90' : (isPaid ? 'border-blue-900/60 bg-gradient-to-r from-[#121a24] to-[#121c2b]' : 'border-amber-900/50 bg-gradient-to-r from-[#121a24] to-[#1a1713]')} rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
         
         <!-- Avatar y Nombre -->
         <div class="flex items-center gap-3 min-w-0 flex-1">
-          <div class="w-9 h-9 rounded-xl ${isPaid ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : (isStarter ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-amber-950/50 text-amber-300 border border-amber-800/40')} flex items-center justify-center font-bold text-xs shrink-0">
-            ${isPaid ? '✓' : initial}
+          <div class="w-9 h-9 rounded-xl ${isPaid ? (isStarter ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/15 text-blue-400 border border-blue-500/30') : (isStarter ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-amber-950/50 text-amber-300 border border-amber-800/40')} flex items-center justify-center font-bold text-xs shrink-0">
+            ${isPaid ? (isStarter ? '✓' : '🎟️') : initial}
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
@@ -456,30 +523,38 @@ function renderPlayers(metrics) {
               ${badgeRole}
               ${p.transactionId ? `<span class="text-[9px] font-mono text-emerald-400 hidden sm:inline">#${p.transactionId}</span>` : ''}
             </div>
-            <span class="text-[11px] ${isPaid ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}">
-              ${isPaid ? 'Pagado ' + formatCurrency(quota) : 'Debe ' + formatCurrency(quota)}
+            <span class="text-[11px] ${statusColor}">
+              ${statusText}
             </span>
           </div>
         </div>
 
-        <!-- Botón de Pago Rojo / Verde / Bloqueado -->
+        <!-- Botón de Pago Rojo / Verde / Azul Reserva / Bloqueado -->
         <div class="flex items-center gap-1.5 shrink-0">
           
-          ${isPaid ? `
-            <!-- BOTÓN VERDE (PAGADO CONFIRMADO POR MERCADO PAGO) -->
-            <div class="badge-paid px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 select-none" title="Pago aprobado por Mercado Pago">
-              <span>PAGADO</span>
-              <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
-            </div>
-          ` : (state.paymentsUnlocked ? `
+          ${isPaid ? (
+            isStarter ? `
+              <!-- BOTÓN VERDE (TITULAR PAGADO) -->
+              <div class="badge-paid px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 select-none" title="Pago aprobado por Mercado Pago">
+                <span>PAGADO</span>
+                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+              </div>
+            ` : `
+              <!-- BOTÓN AZUL (SUPLENTE PAGÓ RESERVA PARA PRÓXIMO PARTIDO) -->
+              <div class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 select-none bg-blue-500/20 text-blue-300 border border-blue-500/40" title="Pago acumulado en el Fondo de Reserva para el próximo partido">
+                <span>RESERVA PAGADA</span>
+                <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+              </div>
+            `
+          ) : (state.paymentsUnlocked ? `
             <!-- BOTÓN ROJO HABILITADO (ABRE MODAL DE MERCADO PAGO OFICIAL) -->
             <button 
               onclick="openPayModal('${p.id}')" 
               class="btn-action-pay px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 active:scale-95 shadow-md shadow-red-500/20"
-              title="Pagar cuota de ${escapeHtml(p.name)} en Mercado Pago"
+              title="${isStarter ? 'Pagar cuota de ' + escapeHtml(p.name) : 'Pagar cuota de reserva de ' + escapeHtml(p.name)}"
             >
               <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
-              <span>Pagar ${formatCurrency(quota)}</span>
+              <span>Pagar ${formatCurrency(quota)} ${isStarter ? '' : '🎟️'}</span>
             </button>
           ` : `
             <!-- BOTÓN BLOQUEADO HASTA COMPLETAR 14 JUGADORES -->
@@ -698,7 +773,13 @@ function generateWhatsAppText() {
   let msg = `⚽ *FÚTBOL CON AMIGOS* ⚽\n`;
   msg += `📍 *Cancha:* ${state.place}\n`;
   msg += `⏰ *Hora:* ${state.datetime}\n`;
-  msg += `💸 *Cuota:* ${quotaStr} por persona\n`;
+  if (metrics.discountFromPrevious > 0) {
+    msg += `🎟️ *Descuento Reserva Anterior:* -${formatCurrency(metrics.discountFromPrevious)}\n`;
+    msg += `💵 *Costo Cancha:* ${formatCurrency(state.totalCost)} (Neto a pagar: ${formatCurrency(metrics.netCost)})\n`;
+  } else {
+    msg += `💵 *Costo Cancha:* ${formatCurrency(state.totalCost)}\n`;
+  }
+  msg += `💸 *Cuota Titulares (14):* ${quotaStr} por persona\n`;
   if (metrics.startersNeeded > 0) {
     msg += `⚠️ *Convocatoria:* Faltan ${metrics.startersNeeded} para los ${metrics.minPlayers} titulares (van ${metrics.totalPlayers}/${metrics.minPlayers})\n\n`;
   } else {
@@ -709,19 +790,23 @@ function generateWhatsAppText() {
   state.players.forEach((p, i) => {
     const isStarter = i < metrics.minPlayers;
     const roleTag = isStarter ? `[Titular ${i + 1}]` : `[Banca ${i - metrics.minPlayers + 1}]`;
-    const icon = p.paid ? '✅' : '❌';
-    const status = p.paid ? 'PAGADO' : `DEBE ${quotaStr}`;
+    const icon = p.paid ? (isStarter ? '✅' : '🎟️') : '❌';
+    const status = p.paid 
+      ? (isStarter ? 'PAGADO' : 'PAGADO (Reserva Próximo Partido)') 
+      : `DEBE ${quotaStr}`;
     msg += `${icon} ${i + 1}. ${p.name} ${roleTag} - ${status}\n`;
   });
 
   msg += `\n`;
-  msg += `💰 *Recaudado:* ${formatCurrency(metrics.collected)} de ${formatCurrency(state.totalCost)}\n`;
-  if (metrics.surplus > 0) {
-    msg += `🍻 *Fondo bebidas / tercer tiempo:* +${formatCurrency(metrics.surplus)}\n`;
-  } else if (metrics.remaining > 0) {
-    msg += `⚠️ *Faltan juntar:* ${formatCurrency(metrics.remaining)}\n`;
+  msg += `💰 *Recaudado Cancha:* ${formatCurrency(metrics.collected)} de ${formatCurrency(metrics.netCost)}\n`;
+  if (metrics.reserveFund > 0) {
+    msg += `🏦 *Fondo de Reserva Acumulado:* +${formatCurrency(metrics.reserveFund)} (${metrics.benchPaidCount} suplentes pagaron)\n`;
+    msg += `*(Este saldo se restará automáticamente en la próxima fecha)*\n`;
+  }
+  if (metrics.remaining > 0) {
+    msg += `⚠️ *Faltan juntar para la cancha:* ${formatCurrency(metrics.remaining)}\n`;
   } else {
-    msg += `🎉 *¡Cancha totalmente cubierta!*\n`;
+    msg += `🎉 *¡Cancha totalmente pagada al 100%!* ⚽\n`;
   }
 
   return msg;
@@ -1003,6 +1088,106 @@ function setupEventListeners() {
       }
     } catch (e) {}
   });
+
+  // Modal Crear Nuevo Partido (Admin)
+  const modalNewMatch = document.getElementById('modal-new-match');
+  const btnOpenNewMatch = document.getElementById('btn-admin-new-match');
+  const btnCloseNewMatch = document.getElementById('btn-close-modal-new-match');
+  const formNewMatch = document.getElementById('form-new-match');
+  const inputNewPlace = document.getElementById('new-match-place');
+  const inputNewDatetime = document.getElementById('new-match-datetime');
+  const inputNewTotalCost = document.getElementById('new-match-total-cost');
+  const inputNewMinPlayers = document.getElementById('new-match-min-players');
+  const checkApplyReserve = document.getElementById('check-apply-reserve');
+
+  function updateNewMatchPreview() {
+    if (!inputNewTotalCost || !inputNewMinPlayers) return;
+    const total = parseFloat(inputNewTotalCost.value) || 0;
+    const minP = parseInt(inputNewMinPlayers.value) || 14;
+    const metrics = calculateMetrics(state);
+    const reserve = (checkApplyReserve && checkApplyReserve.checked) ? metrics.reserveFund : 0;
+    const net = Math.max(0, total - reserve);
+    const quota = minP > 0 ? Math.ceil(net / minP) : 0;
+
+    const previewTotal = document.getElementById('preview-new-total');
+    const previewDiscount = document.getElementById('preview-new-discount');
+    const previewNet = document.getElementById('preview-new-net');
+    const previewQuota = document.getElementById('preview-new-quota');
+
+    if (previewTotal) previewTotal.textContent = formatCurrency(total);
+    if (previewDiscount) previewDiscount.textContent = `-${formatCurrency(reserve)}`;
+    if (previewNet) previewNet.textContent = formatCurrency(net);
+    if (previewQuota) previewQuota.textContent = `${formatCurrency(quota)} c/u`;
+  }
+
+  if (btnOpenNewMatch) {
+    btnOpenNewMatch.addEventListener('click', () => {
+      if (inputNewPlace) inputNewPlace.value = state.place || '';
+      if (inputNewDatetime) inputNewDatetime.value = '';
+      if (inputNewTotalCost) inputNewTotalCost.value = state.totalCost || 40000;
+      if (inputNewMinPlayers) inputNewMinPlayers.value = state.minPlayers || 14;
+      if (checkApplyReserve) checkApplyReserve.checked = true;
+      updateNewMatchPreview();
+      if (modalNewMatch) modalNewMatch.classList.remove('hidden');
+      if (inputNewDatetime) inputNewDatetime.focus();
+      if (window.lucide) lucide.createIcons();
+    });
+  }
+
+  if (btnCloseNewMatch) {
+    btnCloseNewMatch.addEventListener('click', () => {
+      if (modalNewMatch) modalNewMatch.classList.add('hidden');
+    });
+  }
+
+  if (inputNewTotalCost) inputNewTotalCost.addEventListener('input', updateNewMatchPreview);
+  if (inputNewMinPlayers) inputNewMinPlayers.addEventListener('input', updateNewMatchPreview);
+  if (checkApplyReserve) checkApplyReserve.addEventListener('change', updateNewMatchPreview);
+
+  if (formNewMatch) {
+    formNewMatch.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const place = inputNewPlace.value.trim();
+      const datetime = inputNewDatetime.value.trim();
+      const totalCost = parseFloat(inputNewTotalCost.value) || 0;
+      const minPlayers = parseInt(inputNewMinPlayers.value) || 14;
+      const applyReserveDiscount = checkApplyReserve ? checkApplyReserve.checked : true;
+
+      const metrics = calculateMetrics(state);
+      const discountAmount = applyReserveDiscount ? metrics.reserveFund : 0;
+
+      const confirmMsg = `¿Estás seguro de crear el nuevo partido en "${place}" (${datetime})?\n\n` +
+        `• Se iniciará una lista de jugadores limpia desde cero.\n` +
+        `• Descuento de reserva aplicado a la cancha: ${formatCurrency(discountAmount)}.\n` +
+        `• Costo neto a recaudar: ${formatCurrency(Math.max(0, totalCost - discountAmount))}.`;
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const res = await adminFetch('/api/admin/new-match', {
+          method: 'POST',
+          body: JSON.stringify({
+            place,
+            datetime,
+            totalCost,
+            minPlayers,
+            applyReserveDiscount
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (modalNewMatch) modalNewMatch.classList.add('hidden');
+          showToast('¡Nuevo partido creado con éxito! 🏆⚽', '🎉');
+          fireConfetti();
+          playSound('goal');
+          applyRemoteData(data.matchData);
+        } else {
+          alert(data.error || 'Error al crear nuevo partido');
+        }
+      } catch (err) {
+        alert('Error de conexión con el servidor');
+      }
+    });
+  }
 
   // Filtros
   const filterBtns = document.querySelectorAll('.filter-btn');

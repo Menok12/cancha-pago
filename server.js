@@ -14,8 +14,10 @@ const INITIAL_DATA = {
   place: "Canchas La Redonda - Cancha 5",
   datetime: "Viernes 20:00 hs",
   totalCost: 30000,
+  discountFromPrevious: 0, // Descuento aplicado por reserva previa
+  reserveFund: 0, // Fondo de reserva acumulado por suplentes
   minPlayers: 14, // Mínimo de titulares requeridos
-  fixedQuota: 0, // Cuota fija personalizada por persona (si es 0, divide totalCost entre anotados)
+  fixedQuota: 0, // Cuota fija personalizada por persona (si es 0, divide netCost entre 14)
   forcePaymentsOpen: false, // Permitir pagos antes de los 14 si el admin lo fuerza manualmente
   currency: "ARS",
   mpAccessToken: "", // Access Token de Mercado Pago (APP_USR-... o TEST-...)
@@ -44,6 +46,8 @@ function loadData() {
       if (!parsed.minPlayers) parsed.minPlayers = 14;
       if (parsed.fixedQuota === undefined) parsed.fixedQuota = 0;
       if (parsed.forcePaymentsOpen === undefined) parsed.forcePaymentsOpen = false;
+      if (parsed.discountFromPrevious === undefined) parsed.discountFromPrevious = 0;
+      if (parsed.reserveFund === undefined) parsed.reserveFund = 0;
       return parsed;
     }
   } catch (e) {
@@ -76,6 +80,30 @@ function checkAdminAuth(req) {
   return validAdminTokens.has(token);
 }
 
+function getQuota() {
+  if (matchData.fixedQuota && Number(matchData.fixedQuota) > 0) {
+    return Number(matchData.fixedQuota);
+  }
+  const minReq = Math.max(1, Number(matchData.minPlayers) || 14);
+  const discount = Number(matchData.discountFromPrevious) || 0;
+  const netCost = Math.max(0, (Number(matchData.totalCost) || 0) - discount);
+  return Math.ceil(netCost / minReq);
+}
+
+function calculateReserveFund(data) {
+  const minReq = Math.max(1, Number(data.minPlayers) || 14);
+  const players = data.players || [];
+  if (players.length <= minReq) return 0;
+  const quota = getQuota();
+  const benchPlayers = players.slice(minReq);
+  return benchPlayers.reduce((acc, p) => {
+    if (p.paid) {
+      return acc + (Number(p.paidAmount) || quota);
+    }
+    return acc;
+  }, 0);
+}
+
 // Devuelve datos públicos sin exponer el token de admin ni secretos
 function getPublicData() {
   const { adminPassword, mpAccessToken, ...safeData } = matchData;
@@ -84,6 +112,11 @@ function getPublicData() {
   safeData.isReadyForRealPayments = safeData.hasMercadoPagoToken || safeData.hasPaymentLink;
   const minReq = Number(matchData.minPlayers) || 14;
   safeData.paymentsUnlocked = (matchData.players.length >= minReq) || Boolean(matchData.forcePaymentsOpen);
+  safeData.discountFromPrevious = Number(matchData.discountFromPrevious) || 0;
+  safeData.reserveFund = calculateReserveFund(matchData);
+  safeData.quota = getQuota();
+  const discount = Number(matchData.discountFromPrevious) || 0;
+  safeData.netCost = Math.max(0, (Number(matchData.totalCost) || 0) - discount);
   return safeData;
 }
 
@@ -111,14 +144,6 @@ function getLocalIp() {
   return 'localhost';
 }
 
-function getQuota() {
-  if (matchData.fixedQuota && Number(matchData.fixedQuota) > 0) {
-    return Number(matchData.fixedQuota);
-  }
-  const count = matchData.players.length;
-  if (count === 0) return 0;
-  return Math.ceil(matchData.totalCost / count);
-}
 
 // -------------------------------------------------------------
 // COMUNICACIÓN CON LA API OFICIAL DE MERCADO PAGO
@@ -420,6 +445,7 @@ const server = http.createServer(async (req, res) => {
       const player = matchData.players.find(p => p.id === playerId);
       if (player) {
         player.paid = true;
+        player.paidAmount = getQuota();
         player.paidAt = new Date().toISOString();
         player.transactionId = paymentId ? `MP-${paymentId}` : `MP-${Date.now()}`;
         player.method = 'mercadopago_real';
@@ -464,6 +490,7 @@ const server = http.createServer(async (req, res) => {
             const player = matchData.players.find(p => p.id === playerId);
             if (player) {
               player.paid = true;
+              player.paidAmount = getQuota();
               player.paidAt = new Date().toISOString();
               player.transactionId = `MP-${paymentId}`;
               player.method = 'mercadopago_real';
@@ -522,11 +549,57 @@ const server = http.createServer(async (req, res) => {
         if (update.minPlayers !== undefined) matchData.minPlayers = Math.max(1, Number(update.minPlayers) || 14);
         if (update.fixedQuota !== undefined) matchData.fixedQuota = Math.max(0, Number(update.fixedQuota) || 0);
         if (update.forcePaymentsOpen !== undefined) matchData.forcePaymentsOpen = Boolean(update.forcePaymentsOpen);
+        if (update.discountFromPrevious !== undefined) matchData.discountFromPrevious = Math.max(0, Number(update.discountFromPrevious) || 0);
 
         saveData(matchData);
         broadcastUpdate();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, matchData: getPublicData() }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'JSON inválido' }));
+      }
+    });
+    return;
+  }
+
+  // 9b. POST /api/admin/new-match: Crear Nuevo Partido con descuento de reserva acumulada (Admin)
+  if (pathname === '/api/admin/new-match' && req.method === 'POST') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No autorizado' }));
+      return;
+    }
+
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { place, datetime, totalCost, minPlayers, applyReserveDiscount } = JSON.parse(body);
+
+        const currentReserve = calculateReserveFund(matchData);
+        const discountToApply = (applyReserveDiscount !== false) ? currentReserve : 0;
+
+        if (place && place.trim()) matchData.place = place.trim();
+        if (datetime && datetime.trim()) matchData.datetime = datetime.trim();
+        if (totalCost !== undefined && Number(totalCost) >= 0) matchData.totalCost = Number(totalCost);
+        if (minPlayers !== undefined) matchData.minPlayers = Math.max(1, Number(minPlayers) || 14);
+
+        matchData.discountFromPrevious = discountToApply;
+        matchData.reserveFund = 0;
+        matchData.players = [];
+        matchData.forcePaymentsOpen = false;
+        matchData.fixedQuota = 0;
+
+        saveData(matchData);
+        broadcastUpdate();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: `Nuevo partido creado con éxito. Se aplicó un descuento de reserva de $${discountToApply}.`,
+          matchData: getPublicData()
+        }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'JSON inválido' }));
@@ -617,9 +690,11 @@ const server = http.createServer(async (req, res) => {
           if (p) {
             p.paid = (paid !== undefined) ? Boolean(paid) : !p.paid;
             if (p.paid) {
+              p.paidAmount = getQuota();
               p.paidAt = new Date().toISOString();
               p.method = 'manual_efectivo';
             } else {
+              delete p.paidAmount;
               delete p.paidAt;
               delete p.transactionId;
               delete p.method;
@@ -628,6 +703,7 @@ const server = http.createServer(async (req, res) => {
         } else if (action === 'reset-payments') {
           matchData.players.forEach(p => {
             p.paid = false;
+            delete p.paidAmount;
             delete p.paidAt;
             delete p.transactionId;
             delete p.method;

@@ -2,70 +2,28 @@
   "place": "Canchas La Redonda - Cancha 5",
   "datetime": "Viernes 20:00 hs",
   "totalCost": 40000,
+  "discountFromPrevious": 0,
+  "reserveFund": 0,
   "alias": "futbol.amigos.mp",
   "bankHolder": "Lucas (Mercado Pago)",
   "players": [
-    {
-      "id": "3",
-      "name": "Nico",
-      "paid": false,
-      "cardLastFour": "3321"
-    },
-    {
-      "id": "4",
-      "name": "Rodrigo",
-      "paid": false
-    },
-    {
-      "id": "5",
-      "name": "Seba",
-      "paid": false
-    },
-    {
-      "id": "6",
-      "name": "Facundo",
-      "paid": false
-    },
-    {
-      "id": "7",
-      "name": "Joaquín",
-      "paid": false
-    },
-    {
-      "id": "8",
-      "name": "Gonzalo",
-      "paid": false
-    },
-    {
-      "id": "9",
-      "name": "Tomás",
-      "paid": false
-    },
-    {
-      "id": "10",
-      "name": "Mateo",
-      "paid": false
-    },
-    {
-      "id": "1789250537594-e7yd",
-      "name": "Juancito",
-      "paid": false
-    },
-    {
-      "id": "1789258646935-giao",
-      "name": "Federico",
-      "paid": false
-    },
-    {
-      "id": "1789260874380-yywr",
-      "name": "Agustin",
-      "paid": false
-    }
+    { "id": "3", "name": "Nico", "paid": false },
+    { "id": "4", "name": "Rodrigo", "paid": false },
+    { "id": "5", "name": "Seba", "paid": false },
+    { "id": "6", "name": "Facundo", "paid": false },
+    { "id": "7", "name": "Joaquín", "paid": false },
+    { "id": "8", "name": "Gonzalo", "paid": false },
+    { "id": "9", "name": "Tomás", "paid": false },
+    { "id": "10", "name": "Mateo", "paid": false },
+    { "id": "1789250537594-e7yd", "name": "Juancito", "paid": false },
+    { "id": "1789258646935-giao", "name": "Federico", "paid": false },
+    { "id": "1789260874380-yywr", "name": "Agustin", "paid": false }
   ],
   "adminPassword": "admin123",
   "currency": "CLP",
   "minPlayers": 14,
   "fixedQuota": 0,
   "mpPaymentLink": "https://mpago.la/2ASSSnh",
-  "mpAccessToken": "APP_USR-5794845044892481-091221-eabac060a93d4ae67c1f9d44592df0e9-457041264"
+  "mpAccessToken": "APP_USR-5794845044892481-091221-eabac060a93d4ae67c1f9d44592df0e9-457041264",
+  "forcePaymentsOpen": false
 }

@@ -61,6 +61,10 @@
       </span>
 
       <div class="flex items-center gap-1.5 shrink-0">
+        <button id="btn-admin-new-match" class="bg-emerald-600/30 hover:bg-emerald-600/45 text-emerald-300 border border-emerald-500/50 px-2.5 py-1 rounded-lg transition flex items-center gap-1 font-bold shadow-sm" title="Crear un nuevo partido y aplicar reserva acumulada">
+          <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+          <span>Crear Nuevo Partido</span>
+        </button>
         <button id="btn-admin-mp" class="bg-blue-500/25 hover:bg-blue-500/35 text-blue-300 border border-blue-500/40 px-2.5 py-1 rounded-lg transition flex items-center gap-1">
           <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
           <span>Conectar Mercado Pago</span>
@@ -89,6 +93,18 @@
     <!-- 3. TARJETA PRINCIPAL DEL PARTIDO -->
     <section class="bg-[#121a24] border border-slate-800 rounded-3xl p-5 shadow-xl relative overflow-hidden">
       
+      <!-- Descuento aplicado por reserva previa (si existe) -->
+      <div id="hero-discount-banner" class="hidden mb-3 bg-emerald-950/50 border border-emerald-800/60 rounded-2xl px-3 py-2 flex items-center justify-between text-xs font-semibold text-emerald-300 shadow-sm">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-base shrink-0">🎟️</span>
+          <div class="truncate">
+            <span class="text-white font-bold block">Descuento aplicado de reserva anterior:</span>
+            <span class="text-[11px] text-emerald-400/90 truncate block" id="hero-discount-desc">Ahorro acumulado por suplentes de la fecha pasada</span>
+          </div>
+        </div>
+        <span id="hero-discount-amount" class="text-xs sm:text-sm font-extrabold text-emerald-400 bg-emerald-900/60 border border-emerald-700/60 px-2.5 py-0.5 rounded-xl shrink-0">-$0</span>
+      </div>
+
       <!-- Detalle de cancha y horario -->
       <div class="flex items-center gap-2 text-xs font-semibold text-emerald-400 mb-2">
         <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
@@ -126,6 +142,18 @@
         <span id="hero-bench-badge" class="text-[11px] text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded-lg hidden">
           0 en banca
         </span>
+      </div>
+
+      <!-- Fondo de Reserva Acumulado para Próximo Partido -->
+      <div id="hero-reserve-banner" class="hidden mt-2.5 bg-gradient-to-r from-blue-950/60 via-slate-900 to-blue-950/60 border border-blue-700/60 rounded-2xl px-3.5 py-2.5 flex items-center justify-between text-xs shadow-md">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-lg shrink-0">🏦</span>
+          <div class="truncate">
+            <span class="font-bold text-blue-200 block">Fondo de Reserva para Próximo Partido:</span>
+            <span class="text-[11px] text-slate-400 truncate block" id="hero-reserve-count">0 suplentes pagaron (se restará en el próximo partido)</span>
+          </div>
+        </div>
+        <span id="hero-reserve-amount" class="text-xs sm:text-sm font-black text-blue-400 bg-blue-950/80 border border-blue-800/80 px-2.5 py-1 rounded-xl shrink-0">+$0</span>
       </div>
 
       <!-- Fondo para Bebidas / Tercer Tiempo (si hay excedente) -->
@@ -493,6 +521,85 @@
         <button type="submit" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition">
           Actualizar Clave
         </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- F. CREAR NUEVO PARTIDO (Admin) -->
+  <div id="modal-new-match" class="fixed inset-0 z-50 modal-backdrop bg-black/75 hidden flex items-center justify-center p-4">
+    <div class="bg-[#121a24] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl animate-pop max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🏆</span>
+          <div>
+            <h3 class="font-bold text-base text-white">Crear Nuevo Partido</h3>
+            <span class="text-[10px] text-slate-400">Inicia una nueva fecha con lista limpia</span>
+          </div>
+        </div>
+        <button id="btn-close-modal-new-match" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="bg-blue-950/40 border border-blue-800/60 p-3 rounded-2xl text-xs text-blue-200 leading-relaxed">
+        ℹ️ Al crear la nueva fecha, la lista de amigos se reinicia desde cero para que se vuelvan a anotar. Si hay dinero en el <strong>Fondo de Reserva</strong>, se restará automáticamente del total de la cancha.
+      </div>
+
+      <form id="form-new-match" class="space-y-3">
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Cancha / Complejo</label>
+          <input type="text" id="new-match-place" class="w-full bg-black/40 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500" required>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Nueva Fecha y Hora</label>
+          <input type="text" id="new-match-datetime" placeholder="Ej: Viernes 20:00 hs" class="w-full bg-black/40 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500" required>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Costo Cancha ($)</label>
+            <input type="number" id="new-match-total-cost" class="w-full bg-black/40 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500" required>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Mínimo Titulares</label>
+            <input type="number" id="new-match-min-players" value="14" min="2" max="40" class="w-full bg-black/40 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500" required>
+          </div>
+        </div>
+
+        <!-- Caja de cálculo en vivo del descuento -->
+        <div class="bg-black/40 border border-slate-800 rounded-2xl p-3.5 space-y-2 text-xs">
+          <div class="flex items-center justify-between text-slate-300">
+            <span>Costo total cancha:</span>
+            <span id="preview-new-total" class="font-bold text-white">$0</span>
+          </div>
+          <div class="flex items-center justify-between text-emerald-400">
+            <span>Descuento de Reserva acumulado:</span>
+            <span id="preview-new-discount" class="font-bold">-$0</span>
+          </div>
+          <div class="pt-2 border-t border-slate-800 flex items-center justify-between font-bold">
+            <span class="text-white">Neto a recaudar:</span>
+            <span id="preview-new-net" class="text-emerald-400 text-sm font-black">$0</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-400">
+            <span>Cuota estimada por jugador:</span>
+            <span id="preview-new-quota" class="font-bold text-slate-200">$0 c/u</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="check-apply-reserve" checked class="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-black/40">
+          <label for="check-apply-reserve" class="text-xs text-slate-300 cursor-pointer">
+            Restar automáticamente la reserva acumulada de este partido
+          </label>
+        </div>
+
+        <div class="pt-2">
+          <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 font-extrabold py-3 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Crear Nuevo Partido 🚀</span>
+          </button>
+        </div>
       </form>
     </div>
   </div>
