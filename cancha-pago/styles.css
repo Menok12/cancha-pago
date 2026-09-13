@@ -1,0 +1,92 @@
+/* Estilos CanchaPago - Diseño Minimalista y Agradable */
+
+:root {
+  --bg-main: #0b0f17;
+  --card-bg: #121a24;
+  --card-border: #1e2c3d;
+  --accent-green: #10b981;
+  --accent-red: #ef4444;
+}
+
+body {
+  background-color: var(--bg-main);
+  background-image: radial-gradient(circle at 50% -20%, rgba(16, 185, 129, 0.08) 0%, transparent 70%);
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Animaciones suaves */
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-pop {
+  animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Botón de PAGO ROJO (Pendiente) */
+.btn-action-pay {
+  background: #dc2626;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.3);
+  transition: all 0.15s ease;
+}
+
+.btn-action-pay:hover {
+  background: #ef4444;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.45);
+  transform: translateY(-1px);
+}
+
+.btn-action-pay:active {
+  transform: scale(0.96);
+}
+
+/* Botón/Badge VERDE (Pagado) */
+.badge-paid {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  transition: all 0.15s ease;
+}
+
+.badge-paid:hover {
+  background: rgba(16, 185, 129, 0.22);
+}
+
+/* Tarjeta de jugador limpia */
+.player-row {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.player-row:hover {
+  background-color: #172230;
+}
+
+/* Festejo de meta */
+@keyframes pulseGoal {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+}
+
+.pulse-complete {
+  animation: pulseGoal 2s infinite ease-out;
+}
+
+/* Modal backdrop blur */
+.modal-backdrop {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}

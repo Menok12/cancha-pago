@@ -1,0 +1,70 @@
+{
+  "place": "Canchas La Redonda - Cancha 5",
+  "datetime": "Viernes 20:00 hs",
+  "totalCost": 30000,
+  "alias": "futbol.amigos.mp",
+  "bankHolder": "Lucas (Mercado Pago)",
+  "players": [
+    {
+      "id": "1",
+      "name": "Lucas",
+      "paid": false
+    },
+    {
+      "id": "2",
+      "name": "Martín",
+      "paid": false,
+      "cardLastFour": "8821"
+    },
+    {
+      "id": "3",
+      "name": "Nico",
+      "paid": false,
+      "cardLastFour": "3321"
+    },
+    {
+      "id": "4",
+      "name": "Rodrigo",
+      "paid": false
+    },
+    {
+      "id": "5",
+      "name": "Seba",
+      "paid": false
+    },
+    {
+      "id": "6",
+      "name": "Facundo",
+      "paid": false
+    },
+    {
+      "id": "7",
+      "name": "Joaquín",
+      "paid": false
+    },
+    {
+      "id": "8",
+      "name": "Gonzalo",
+      "paid": false
+    },
+    {
+      "id": "9",
+      "name": "Tomás",
+      "paid": false
+    },
+    {
+      "id": "10",
+      "name": "Mateo",
+      "paid": false
+    },
+    {
+      "id": "1789250537594-e7yd",
+      "name": "Juancito",
+      "paid": false
+    }
+  ],
+  "adminPassword": "admin123",
+  "currency": "CLP",
+  "mpPaymentLink": "https://mpago.la/2ASSSnh",
+  "mpAccessToken": ""
+}
