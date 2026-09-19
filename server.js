@@ -176,12 +176,14 @@ function createMercadoPagoPreference(player, host) {
     };
 
     if (!isLocal) {
+      preferenceObj.notification_url = `${protocol}://${host}/api/webhook/mercadopago`;
       preferenceObj.back_urls = {
         success: `${protocol}://${host}/payment/success?playerId=${player.id}`,
         failure: `${protocol}://${host}/payment/failure?playerId=${player.id}`,
         pending: `${protocol}://${host}/payment/pending?playerId=${player.id}`
       };
       preferenceObj.auto_return = 'approved';
+      preferenceObj.binary_mode = true;
     }
 
     const preferencePayload = JSON.stringify(preferenceObj);
@@ -250,6 +252,43 @@ function verifyMercadoPagoPayment(paymentId) {
     });
 
     req.on('error', reject);
+    req.end();
+  });
+}
+
+// 2b. Buscar pago aprobado por external_reference (playerId) directamente en Mercado Pago
+function searchMercadoPagoPaymentByPlayer(playerId) {
+  return new Promise((resolve) => {
+    if (!matchData.mpAccessToken) return resolve(null);
+
+    const options = {
+      hostname: 'api.mercadopago.com',
+      path: `/v1/payments/search?external_reference=${encodeURIComponent(playerId)}&sort=date_created&criteria=desc`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${matchData.mpAccessToken.trim()}`
+      }
+    };
+
+    const req = https.request(options, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && Array.isArray(parsed.results) && parsed.results.length > 0) {
+            const approvedPayment = parsed.results.find(p => p.status === 'approved');
+            resolve(approvedPayment || null);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', () => resolve(null));
     req.end();
   });
 }
@@ -404,7 +443,8 @@ const server = http.createServer(async (req, res) => {
         const newPlayer = {
           id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 4),
           name: trimmed,
-          paid: false
+          paid: false,
+          cashPending: false
         };
 
         matchData.players.push(newPlayer);
@@ -413,6 +453,41 @@ const server = http.createServer(async (req, res) => {
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, player: newPlayer, matchData: getPublicData() }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'JSON inválido' }));
+      }
+    });
+    return;
+  }
+
+  // 3c. POST /api/player/cash-payment: Avisar pago en efectivo en cancha (Amarillo / Pendiente)
+  if (pathname === '/api/player/cash-payment' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { playerId } = JSON.parse(body);
+        const player = matchData.players.find(p => p.id === playerId);
+        if (!player) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Jugador no encontrado' }));
+          return;
+        }
+
+        if (player.paid) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: 'Ya se encuentra pagado', matchData: getPublicData() }));
+          return;
+        }
+
+        player.cashPending = true;
+        player.cashNotifiedAt = new Date().toISOString();
+        saveData(matchData);
+        broadcastUpdate();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Aviso de pago en efectivo registrado', matchData: getPublicData() }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'JSON inválido' }));
@@ -445,6 +520,7 @@ const server = http.createServer(async (req, res) => {
       const player = matchData.players.find(p => p.id === playerId);
       if (player) {
         player.paid = true;
+        player.cashPending = false;
         player.paidAmount = getQuota();
         player.paidAt = new Date().toISOString();
         player.transactionId = paymentId ? `MP-${paymentId}` : `MP-${Date.now()}`;
@@ -474,14 +550,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 7. POST /api/webhook/mercadopago: Notificaciones IPN de Mercado Pago
-  if (pathname === '/api/webhook/mercadopago' && req.method === 'POST') {
+  // 7. /api/webhook/mercadopago: Notificaciones IPN de Mercado Pago (POST y GET)
+  if (pathname === '/api/webhook/mercadopago' && (req.method === 'POST' || req.method === 'GET')) {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
       try {
-        const event = JSON.parse(body || '{}');
-        const paymentId = event?.data?.id || parsedUrl.searchParams.get('data.id') || parsedUrl.searchParams.get('id');
+        let paymentId = parsedUrl.searchParams.get('data.id') || 
+                        parsedUrl.searchParams.get('id') || 
+                        parsedUrl.searchParams.get('payment_id');
+
+        if (body) {
+          try {
+            const event = JSON.parse(body);
+            paymentId = event?.data?.id || event?.id || paymentId;
+            if (!paymentId && event?.resource) {
+              const parts = event.resource.split('/');
+              paymentId = parts[parts.length - 1];
+            }
+          } catch (e) {}
+        }
 
         if (paymentId && matchData.mpAccessToken) {
           const payment = await verifyMercadoPagoPayment(paymentId);
@@ -490,6 +578,7 @@ const server = http.createServer(async (req, res) => {
             const player = matchData.players.find(p => p.id === playerId);
             if (player) {
               player.paid = true;
+              player.cashPending = false;
               player.paidAmount = getQuota();
               player.paidAt = new Date().toISOString();
               player.transactionId = `MP-${paymentId}`;
@@ -504,6 +593,49 @@ const server = http.createServer(async (req, res) => {
       res.end('OK');
     });
     return;
+  }
+
+  // 7b. GET /api/check-payment/:playerId: Consulta directa a Mercado Pago por si no volvió de la app
+  if (pathname.startsWith('/api/check-payment/') && req.method === 'GET') {
+    const playerId = pathname.replace('/api/check-payment/', '').trim();
+    const player = matchData.players.find(p => p.id === playerId);
+    if (!player) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Jugador no encontrado' }));
+      return;
+    }
+
+    if (player.paid) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, paid: true, message: '¡Ya está registrado como pagado!' }));
+      return;
+    }
+
+    try {
+      const approvedPayment = await searchMercadoPagoPaymentByPlayer(playerId);
+      if (approvedPayment && approvedPayment.status === 'approved') {
+        player.paid = true;
+        player.cashPending = false;
+        player.paidAmount = getQuota();
+        player.paidAt = new Date().toISOString();
+        player.transactionId = `MP-${approvedPayment.id}`;
+        player.method = 'mercadopago_real';
+        saveData(matchData);
+        broadcastUpdate();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, paid: true, message: '¡Pago verificado y aprobado con éxito en Mercado Pago!' }));
+        return;
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, paid: false, message: 'No se encontró un pago aprobado para este jugador en Mercado Pago aún.' }));
+        return;
+      }
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Error al consultar Mercado Pago' }));
+      return;
+    }
   }
 
   // 8. POST /api/admin/login: Login de Administrador
@@ -689,6 +821,7 @@ const server = http.createServer(async (req, res) => {
           const p = matchData.players.find(pl => pl.id === playerId);
           if (p) {
             p.paid = (paid !== undefined) ? Boolean(paid) : !p.paid;
+            p.cashPending = false;
             if (p.paid) {
               p.paidAmount = getQuota();
               p.paidAt = new Date().toISOString();
@@ -703,6 +836,7 @@ const server = http.createServer(async (req, res) => {
         } else if (action === 'reset-payments') {
           matchData.players.forEach(p => {
             p.paid = false;
+            p.cashPending = false;
             delete p.paidAmount;
             delete p.paidAt;
             delete p.transactionId;

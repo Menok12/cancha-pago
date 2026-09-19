@@ -17,7 +17,10 @@ let state = {
   hasPaymentLink: false,
   isReadyForRealPayments: false,
   players: [],
-  currentFilter: "all"
+  currentFilter: "all",
+  activeTab: "list",
+  customTeamA: null,
+  customTeamB: null
 };
 
 let adminToken = sessionStorage.getItem('cancha_admin_token') || null;
@@ -275,6 +278,7 @@ function calculateMetrics(st) {
   const startersCount = Math.min(totalPlayers, minPlayers);
   const startersNeeded = Math.max(0, minPlayers - totalPlayers);
   const benchCount = Math.max(0, totalPlayers - minPlayers);
+  const cashPendingCount = st.players.filter(p => !p.paid && p.cashPending).length;
 
   return {
     quota,
@@ -286,6 +290,7 @@ function calculateMetrics(st) {
     pendingCount,
     startersPaidCount,
     benchPaidCount,
+    cashPendingCount,
     collected: collectedForCourt,
     remaining,
     surplus,
@@ -388,7 +393,8 @@ function render() {
     }
   }
 
-  document.getElementById('hero-progress-text').textContent = `${metrics.startersPaidCount} de ${metrics.startersCount} titulares pagaron`;
+  const cashText = metrics.cashPendingCount > 0 ? ` (${metrics.cashPendingCount} en efectivo 💵)` : '';
+  document.getElementById('hero-progress-text').textContent = `${metrics.startersPaidCount} de ${metrics.startersCount} titulares pagaron${cashText}`;
   document.getElementById('hero-remaining-text').textContent = metrics.remaining > 0 
     ? `Falta ${formatCurrency(metrics.remaining)}` 
     : '¡Cancha 100% Pagada! 🎉';
@@ -431,6 +437,7 @@ function render() {
   }
 
   renderPlayers(metrics);
+  renderTacticalPitch(metrics);
 
   if (window.lucide) {
     lucide.createIcons();
@@ -479,6 +486,7 @@ function renderPlayers(metrics) {
     const originalIndex = state.players.findIndex(x => x.id === p.id);
     const isStarter = originalIndex < minPlayers;
     const isPaid = p.paid;
+    const isCash = !isPaid && p.cashPending;
     const initial = (p.name || '?').charAt(0).toUpperCase();
 
     // Separador de banca cuando mostramos 'Todos'
@@ -501,21 +509,23 @@ function renderPlayers(metrics) {
           ? `<span class="text-[10px] text-blue-300 font-semibold bg-blue-950/80 border border-blue-700/60 px-1.5 py-0.5 rounded flex items-center gap-1"><span>🎟️</span><span>Banca #${originalIndex - minPlayers + 1} (Reserva Próxima Fecha)</span></span>`
           : `<span class="text-[10px] text-amber-400 font-semibold bg-amber-950/70 border border-amber-800/60 px-1.5 py-0.5 rounded">Banca #${originalIndex - minPlayers + 1}</span>`);
 
-    const statusText = isStarter
-      ? (isPaid ? 'Pagado ' + formatCurrency(quota) : 'Debe ' + formatCurrency(quota))
-      : (isPaid ? 'Pagado ' + formatCurrency(quota) + ' (Fondo de Reserva)' : 'Cuota ' + formatCurrency(quota) + ' (Fondo Reserva)');
+    const statusText = isPaid
+      ? (isStarter ? 'Pagado ' + formatCurrency(quota) : 'Pagado ' + formatCurrency(quota) + ' (Fondo de Reserva)')
+      : (isCash 
+          ? 'Paga en efectivo en cancha (' + formatCurrency(quota) + ' Pendiente)' 
+          : (isStarter ? 'Debe ' + formatCurrency(quota) : 'Cuota ' + formatCurrency(quota) + ' (Fondo Reserva)'));
 
     const statusColor = isPaid 
       ? (isStarter ? 'text-emerald-400 font-medium' : 'text-blue-400 font-medium')
-      : (isStarter ? 'text-rose-400 font-medium' : 'text-amber-400/90 font-medium');
+      : (isCash ? 'text-amber-400 font-medium' : (isStarter ? 'text-rose-400 font-medium' : 'text-amber-400/90 font-medium'));
 
     html += `
-      <div class="player-row bg-[#121a24] border ${isStarter ? 'border-slate-800/90' : (isPaid ? 'border-blue-900/60 bg-gradient-to-r from-[#121a24] to-[#121c2b]' : 'border-amber-900/50 bg-gradient-to-r from-[#121a24] to-[#1a1713]')} rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
+      <div class="player-row bg-[#121a24] border ${isCash ? 'border-amber-500/50 bg-gradient-to-r from-[#121a24] to-[#1c1810]' : (isStarter ? 'border-slate-800/90' : (isPaid ? 'border-blue-900/60 bg-gradient-to-r from-[#121a24] to-[#121c2b]' : 'border-amber-900/50 bg-gradient-to-r from-[#121a24] to-[#1a1713]'))} rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm">
         
         <!-- Avatar y Nombre -->
         <div class="flex items-center gap-3 min-w-0 flex-1">
-          <div class="w-9 h-9 rounded-xl ${isPaid ? (isStarter ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/15 text-blue-400 border border-blue-500/30') : (isStarter ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-amber-950/50 text-amber-300 border border-amber-800/40')} flex items-center justify-center font-bold text-xs shrink-0">
-            ${isPaid ? (isStarter ? '✓' : '🎟️') : initial}
+          <div class="w-9 h-9 rounded-xl ${isPaid ? (isStarter ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/15 text-blue-400 border border-blue-500/30') : (isCash ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40' : (isStarter ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-amber-950/50 text-amber-300 border border-amber-800/40'))} flex items-center justify-center font-bold text-xs shrink-0">
+            ${isPaid ? (isStarter ? '✓' : '🎟️') : (isCash ? '💵' : initial)}
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
@@ -529,7 +539,7 @@ function renderPlayers(metrics) {
           </div>
         </div>
 
-        <!-- Botón de Pago Rojo / Verde / Azul Reserva / Bloqueado -->
+        <!-- Botón de Pago Rojo / Verde / Amarillo Efectivo / Azul Reserva / Bloqueado -->
         <div class="flex items-center gap-1.5 shrink-0">
           
           ${isPaid ? (
@@ -546,7 +556,17 @@ function renderPlayers(metrics) {
                 <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
               </div>
             `
-          ) : (state.paymentsUnlocked ? `
+          ) : (isCash ? `
+            <!-- BOTÓN AMARILLO (PAGA EN EFECTIVO EN CANCHA - PENDIENTE) -->
+            <button 
+              onclick="openPayModal('${p.id}')" 
+              class="badge-cash-pending px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-md shadow-amber-500/10"
+              title="Avisó pago en efectivo en cancha. Haz clic si prefieres pagar con Mercado Pago."
+            >
+              <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+              <span>EFECTIVO (PENDIENTE)</span>
+            </button>
+          ` : (state.paymentsUnlocked ? `
             <!-- BOTÓN ROJO HABILITADO (ABRE MODAL DE MERCADO PAGO OFICIAL) -->
             <button 
               onclick="openPayModal('${p.id}')" 
@@ -566,7 +586,7 @@ function renderPlayers(metrics) {
               <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-400"></i>
               <span>Esperando 14 (${state.players.length}/${minPlayers})</span>
             </button>
-          `)}
+          `))}
 
           <!-- CONTROLES EXCLUSIVOS DE ADMINISTRADOR -->
           ${isAdmin ? `
@@ -616,6 +636,171 @@ function escapeHtml(str) {
 }
 
 // -------------------------------------------------------------
+// CANCHA TÁCTICA 7V7
+// -------------------------------------------------------------
+function renderPlayerChipHtml(player, teamType, posLabel) {
+  if (!player) {
+    return `
+      <div class="flex flex-col items-center opacity-40 select-none py-1">
+        <div class="w-8 h-8 rounded-full border border-dashed border-white/50 flex items-center justify-center text-white text-[11px] font-bold">
+          +
+        </div>
+        <span class="text-[9px] text-white/70 mt-1 font-mono tracking-tight">${posLabel}</span>
+      </div>
+    `;
+  }
+
+  const initial = (player.name || '?').charAt(0).toUpperCase();
+  const isWhite = teamType === 'white';
+  const jerseyClass = isWhite ? 'jersey-white' : 'jersey-dark';
+  const roleColor = isWhite ? 'text-slate-400' : 'text-sky-300';
+  const isCash = !player.paid && player.cashPending;
+  const paidBadge = player.paid 
+    ? `<span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 text-slate-950 rounded-full flex items-center justify-center text-[9px] font-black shadow-md">✓</span>`
+    : (isCash 
+        ? `<span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-400 text-slate-950 rounded-full flex items-center justify-center text-[8px] font-black shadow-md" title="Paga en efectivo en cancha">💵</span>` 
+        : '');
+
+  let clickHandler = '';
+  if (player.paid) {
+    clickHandler = `onclick="showToast('${escapeHtml(player.name)} ya pagó su cuota 🟢', '✅')" role="button"`;
+  } else if (isCash) {
+    clickHandler = `onclick="openPayModal('${player.id}')" role="button"`;
+  } else if (state.paymentsUnlocked) {
+    clickHandler = `onclick="openPayModal('${player.id}')" role="button"`;
+  } else {
+    clickHandler = `onclick="alertPaymentsLocked()" role="button"`;
+  }
+
+  return `
+    <div class="player-chip flex flex-col items-center select-none py-1 cursor-pointer" ${clickHandler} title="${escapeHtml(player.name)} (${posLabel}) - ${player.paid ? 'Pagado' : (isCash ? 'Efectivo en Cancha (Pendiente)' : 'Pendiente')}">
+      <div class="relative">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center font-black text-xs ${jerseyClass}">
+          ${initial}
+        </div>
+        ${paidBadge}
+      </div>
+      <div class="bg-black/80 backdrop-blur-md border border-white/10 px-1.5 py-0.5 rounded-lg mt-1 max-w-[70px] text-center shadow-md">
+        <span class="block text-[10px] font-bold text-white truncate leading-tight">${escapeHtml(player.name)}</span>
+        <span class="block text-[8px] font-extrabold ${roleColor} leading-none tracking-tight">${posLabel}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderTacticalPitch(metrics) {
+  const pitchContainer = document.getElementById('view-pitch-container');
+  if (!pitchContainer) return;
+
+  const starters = state.players.slice(0, 14);
+
+  // Determinar equipos (manteniendo sorteo si fue realizado y sigue siendo consistente)
+  let teamA = [];
+  let teamB = [];
+
+  if (state.customTeamA && state.customTeamB) {
+    const starterIds = new Set(starters.map(p => p.id));
+    const validA = state.customTeamA.filter(p => starterIds.has(p.id)).map(p => state.players.find(x => x.id === p.id) || p);
+    const validB = state.customTeamB.filter(p => starterIds.has(p.id)).map(p => state.players.find(x => x.id === p.id) || p);
+
+    const assignedIds = new Set([...validA.map(p => p.id), ...validB.map(p => p.id)]);
+    const unassigned = starters.filter(p => !assignedIds.has(p.id));
+
+    unassigned.forEach(p => {
+      if (validA.length <= validB.length && validA.length < 7) {
+        validA.push(p);
+      } else if (validB.length < 7) {
+        validB.push(p);
+      } else if (validA.length < 7) {
+        validA.push(p);
+      }
+    });
+
+    teamA = validA;
+    teamB = validB;
+    state.customTeamA = validA;
+    state.customTeamB = validB;
+  } else {
+    // Por defecto: primeros 7 a Blanco, siguientes 7 a Azul
+    teamA = starters.slice(0, 7);
+    teamB = starters.slice(7, 14);
+  }
+
+  // Contadores
+  const countAEl = document.getElementById('pitch-team-a-count');
+  const countBEl = document.getElementById('pitch-team-b-count');
+  if (countAEl) countAEl.textContent = `${teamA.length}/7`;
+  if (countBEl) countBEl.textContent = `${teamB.length}/7`;
+
+  // Renderizar Equipo Blanco (1-2-3-1):
+  // 0: GK
+  // 1, 2: DEF
+  // 3, 4, 5: MID
+  // 6: FWD
+  const gkElA = document.getElementById('pitch-a-gk');
+  const defElA = document.getElementById('pitch-a-def');
+  const midElA = document.getElementById('pitch-a-mid');
+  const fwdElA = document.getElementById('pitch-a-fwd');
+
+  if (gkElA) gkElA.innerHTML = renderPlayerChipHtml(teamA[0], 'white', 'ARQ');
+  if (defElA) defElA.innerHTML = `
+    ${renderPlayerChipHtml(teamA[1], 'white', 'DEF')}
+    ${renderPlayerChipHtml(teamA[2], 'white', 'DEF')}
+  `;
+  if (midElA) midElA.innerHTML = `
+    ${renderPlayerChipHtml(teamA[3], 'white', 'MED')}
+    ${renderPlayerChipHtml(teamA[4], 'white', 'MED')}
+    ${renderPlayerChipHtml(teamA[5], 'white', 'MED')}
+  `;
+  if (fwdElA) fwdElA.innerHTML = renderPlayerChipHtml(teamA[6], 'white', 'DEL');
+
+  // Renderizar Equipo Azul (1-3-2-1 invertido):
+  // 0: DEL
+  // 1, 2, 3: MED
+  // 4, 5: DEF
+  // 6: ARQ
+  const fwdElB = document.getElementById('pitch-b-fwd');
+  const midElB = document.getElementById('pitch-b-mid');
+  const defElB = document.getElementById('pitch-b-def');
+  const gkElB = document.getElementById('pitch-b-gk');
+
+  if (fwdElB) fwdElB.innerHTML = renderPlayerChipHtml(teamB[0], 'dark', 'DEL');
+  if (midElB) midElB.innerHTML = `
+    ${renderPlayerChipHtml(teamB[1], 'dark', 'MED')}
+    ${renderPlayerChipHtml(teamB[2], 'dark', 'MED')}
+    ${renderPlayerChipHtml(teamB[3], 'dark', 'MED')}
+  `;
+  if (defElB) defElB.innerHTML = `
+    ${renderPlayerChipHtml(teamB[4], 'dark', 'DEF')}
+    ${renderPlayerChipHtml(teamB[5], 'dark', 'DEF')}
+  `;
+  if (gkElB) gkElB.innerHTML = renderPlayerChipHtml(teamB[6], 'dark', 'ARQ');
+
+  // Suplentes / Banca
+  const bench = state.players.slice(14);
+  const benchCountEl = document.getElementById('pitch-bench-count');
+  const benchListEl = document.getElementById('pitch-bench-list');
+
+  if (benchCountEl) {
+    benchCountEl.textContent = `${bench.length} ${bench.length === 1 ? 'suplente' : 'suplentes'}`;
+  }
+
+  if (benchListEl) {
+    if (bench.length === 0) {
+      benchListEl.innerHTML = `<span class="text-xs text-slate-500 italic py-1">No hay suplentes en banca todavía. Si se suman más de 14, aparecerán aquí.</span>`;
+    } else {
+      benchListEl.innerHTML = bench.map((p, i) => `
+        <div class="inline-flex items-center gap-1.5 bg-[#141b25] border ${p.paid ? 'border-blue-500/40 text-blue-300' : 'border-amber-700/40 text-amber-300'} px-2.5 py-1 rounded-xl text-xs font-semibold shadow-sm">
+          <span>${p.paid ? '🎟️' : '🪑'}</span>
+          <span class="text-white">${escapeHtml(p.name)}</span>
+          <span class="text-[10px] ${p.paid ? 'text-emerald-400 font-bold' : 'text-slate-400'}">${p.paid ? '✓ Reserva' : `#${i + 1}`}</span>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+// -------------------------------------------------------------
 // FLUJO DE PAGO: MERCADO PAGO OFICIAL
 // -------------------------------------------------------------
 window.alertPaymentsLocked = function() {
@@ -654,7 +839,31 @@ window.openPayModal = async function(playerId) {
   const modal = document.getElementById('modal-pay');
   modal.classList.remove('hidden');
 
+  const btnCashReset = document.getElementById('btn-choose-cash');
+  if (btnCashReset) {
+    btnCashReset.disabled = false;
+    btnCashReset.innerHTML = `<i data-lucide="banknote" class="w-4 h-4 text-amber-400"></i><span>Pagaré en Efectivo en la Cancha 💵</span>`;
+  }
+  const btnRecheckReset = document.getElementById('btn-recheck-payment');
+  if (btnRecheckReset) {
+    btnRecheckReset.disabled = false;
+    btnRecheckReset.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>¿Ya pagaste y sigue en rojo? Re-verificar estado</span>`;
+  }
+
   if (window.lucide) lucide.createIcons();
+
+  // Verificación silenciosa en segundo plano por si el jugador ya pagó y cerró Mercado Pago
+  fetch(`/api/check-payment/${player.id}`)
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.paid) {
+        closePayModal();
+        showToast(`¡Pago de ${player.name} detectado y verificado en Mercado Pago! 🟢`, '🏆');
+        fireConfetti();
+        playSound('goal');
+      }
+    })
+    .catch(() => {});
 
   // Pedir preferencia oficial al backend
   try {
@@ -790,15 +999,19 @@ function generateWhatsAppText() {
   state.players.forEach((p, i) => {
     const isStarter = i < metrics.minPlayers;
     const roleTag = isStarter ? `[Titular ${i + 1}]` : `[Banca ${i - metrics.minPlayers + 1}]`;
-    const icon = p.paid ? (isStarter ? '✅' : '🎟️') : '❌';
+    const isCash = !p.paid && p.cashPending;
+    const icon = p.paid ? (isStarter ? '✅' : '🎟️') : (isCash ? '🟡' : '❌');
     const status = p.paid 
       ? (isStarter ? 'PAGADO' : 'PAGADO (Reserva Próximo Partido)') 
-      : `DEBE ${quotaStr}`;
+      : (isCash ? `PAGA EFECTIVO EN CANCHA (Debe ${quotaStr})` : `DEBE ${quotaStr}`);
     msg += `${icon} ${i + 1}. ${p.name} ${roleTag} - ${status}\n`;
   });
 
   msg += `\n`;
   msg += `💰 *Recaudado Cancha:* ${formatCurrency(metrics.collected)} de ${formatCurrency(metrics.netCost)}\n`;
+  if (metrics.cashPendingCount > 0) {
+    msg += `💵 *Avisaron pago en efectivo en cancha:* ${metrics.cashPendingCount} personas (Cobrar el día del partido)\n`;
+  }
   if (metrics.reserveFund > 0) {
     msg += `🏦 *Fondo de Reserva Acumulado:* +${formatCurrency(metrics.reserveFund)} (${metrics.benchPaidCount} suplentes pagaron)\n`;
     msg += `*(Este saldo se restará automáticamente en la próxima fecha)*\n`;
@@ -822,6 +1035,81 @@ function copySummary() {
   navigator.clipboard.writeText(text).then(() => {
     showToast('Reporte copiado para pegar en WhatsApp 📲', '✅');
   });
+}
+
+function shuffleTeams() {
+  const starters = [...state.players.slice(0, 14)];
+  if (starters.length < 2) {
+    showToast('Se necesitan al menos 2 jugadores para sortear', '⚠️');
+    return;
+  }
+
+  // Sorteo Fisher-Yates aleatorio
+  for (let i = starters.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [starters[i], starters[j]] = [starters[j], starters[i]];
+  }
+
+  const mid = Math.ceil(starters.length / 2);
+  state.customTeamA = starters.slice(0, mid);
+  state.customTeamB = starters.slice(mid);
+
+  renderTacticalPitch(calculateMetrics(state));
+  if (window.lucide) lucide.createIcons();
+
+  fireConfetti();
+  playSound('goal');
+  showToast('¡Equipos sorteados aleatoriamente! 🎲⚽', '🏟️');
+}
+
+function shareTeamsOnWhatsApp() {
+  const starters = state.players.slice(0, 14);
+  const teamA = (state.customTeamA && state.customTeamA.length > 0) ? state.customTeamA : starters.slice(0, 7);
+  const teamB = (state.customTeamB && state.customTeamB.length > 0) ? state.customTeamB : starters.slice(7, 14);
+  const bench = state.players.slice(14);
+
+  let msg = `⚽ *CANCHAPAGO - FORMACIONES 7 vs 7* ⚽\n`;
+  msg += `📍 *Cancha:* ${state.place}\n`;
+  msg += `⏰ *Hora:* ${state.datetime}\n\n`;
+
+  msg += `⚪ *EQUIPO BLANCO (${teamA.length}/7):*\n`;
+  if (teamA.length === 0) {
+    msg += `_(Sin jugadores aún)_\n`;
+  } else {
+    const posA = ['ARQ', 'DEF', 'DEF', 'MED', 'MED', 'MED', 'DEL'];
+    teamA.forEach((p, idx) => {
+      const pos = posA[idx] || 'JUG';
+      const isCash = !p.paid && p.cashPending;
+      const paidTag = p.paid ? '🟢' : (isCash ? '🟡 (Efectivo)' : '🔴');
+      msg += `${idx + 1}. [${pos}] ${p.name} ${paidTag}\n`;
+    });
+  }
+
+  msg += `\n🔵 *EQUIPO AZUL (${teamB.length}/7):*\n`;
+  if (teamB.length === 0) {
+    msg += `_(Sin jugadores aún)_\n`;
+  } else {
+    const posB = ['DEL', 'MED', 'MED', 'MED', 'DEF', 'DEF', 'ARQ'];
+    teamB.forEach((p, idx) => {
+      const pos = posB[idx] || 'JUG';
+      const isCash = !p.paid && p.cashPending;
+      const paidTag = p.paid ? '🟢' : (isCash ? '🟡 (Efectivo)' : '🔴');
+      msg += `${idx + 1}. [${pos}] ${p.name} ${paidTag}\n`;
+    });
+  }
+
+  if (bench.length > 0) {
+    msg += `\n🪑 *BANCA DE SUPLENTES / RESERVA:*\n`;
+    bench.forEach((p, idx) => {
+      const isCash = !p.paid && p.cashPending;
+      const paidTag = p.paid ? '🎟️ (Reserva Pagada)' : (isCash ? '🟡 (Efectivo en cancha)' : '⏳');
+      msg += `${idx + 1}. ${p.name} - ${paidTag}\n`;
+    });
+  }
+
+  msg += `\n📲 *Mira la cancha interactiva y tu estado aquí:*\n${window.location.href}\n`;
+
+  window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
 // -------------------------------------------------------------
@@ -1134,6 +1422,15 @@ function setupEventListeners() {
     });
   }
 
+  const btnModalOpenNewMatch = document.getElementById('btn-modal-open-new-match');
+  if (btnModalOpenNewMatch) {
+    btnModalOpenNewMatch.addEventListener('click', () => {
+      const modalEdit = document.getElementById('modal-edit-match');
+      if (modalEdit) modalEdit.classList.add('hidden');
+      if (btnOpenNewMatch) btnOpenNewMatch.click();
+    });
+  }
+
   if (btnCloseNewMatch) {
     btnCloseNewMatch.addEventListener('click', () => {
       if (modalNewMatch) modalNewMatch.classList.add('hidden');
@@ -1209,6 +1506,108 @@ function setupEventListeners() {
   // WhatsApp
   document.getElementById('btn-share-whatsapp').addEventListener('click', shareOnWhatsApp);
   document.getElementById('btn-copy-summary').addEventListener('click', copySummary);
+
+  // Selector de Pestañas: Lista y Cobros vs Cancha Táctica (7v7)
+  const tabBtnList = document.getElementById('tab-btn-list');
+  const tabBtnPitch = document.getElementById('tab-btn-pitch');
+  const viewList = document.getElementById('view-list-container');
+  const viewPitch = document.getElementById('view-pitch-container');
+
+  if (tabBtnList && tabBtnPitch && viewList && viewPitch) {
+    tabBtnList.addEventListener('click', () => {
+      state.activeTab = 'list';
+      viewList.classList.remove('hidden');
+      viewPitch.classList.add('hidden');
+
+      tabBtnList.className = 'py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 bg-slate-800 text-white shadow-sm';
+      tabBtnPitch.className = 'py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+    });
+
+    tabBtnPitch.addEventListener('click', () => {
+      state.activeTab = 'pitch';
+      viewList.classList.add('hidden');
+      viewPitch.classList.remove('hidden');
+
+      tabBtnPitch.className = 'py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 bg-slate-800 text-white shadow-sm';
+      tabBtnList.className = 'py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+
+      renderTacticalPitch(calculateMetrics(state));
+      if (window.lucide) lucide.createIcons();
+    });
+  }
+
+  // Controles de Cancha Táctica
+  const btnShuffle = document.getElementById('btn-shuffle-teams');
+  if (btnShuffle) {
+    btnShuffle.addEventListener('click', shuffleTeams);
+  }
+
+  const btnShareTeams = document.getElementById('btn-share-teams-whatsapp');
+  if (btnShareTeams) {
+    btnShareTeams.addEventListener('click', shareTeamsOnWhatsApp);
+  }
+
+  // Re-verificar pago en Mercado Pago directamente
+  const btnRecheck = document.getElementById('btn-recheck-payment');
+  if (btnRecheck) {
+    btnRecheck.addEventListener('click', async () => {
+      if (!currentPayingPlayer) return;
+      btnRecheck.disabled = true;
+      btnRecheck.innerHTML = `<span class="inline-block animate-spin mr-1">⏳</span> Consultando a Mercado Pago...`;
+
+      try {
+        const res = await fetch(`/api/check-payment/${currentPayingPlayer.id}`);
+        const data = await res.json();
+        if (data && data.paid) {
+          closePayModal();
+          showToast('¡Pago aprobado por Mercado Pago con éxito! 🟢', '🏆');
+          fireConfetti();
+          playSound('goal');
+        } else {
+          showToast(data.message || 'Aún no figura aprobado en Mercado Pago', '⏳');
+          btnRecheck.disabled = false;
+          btnRecheck.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>¿Ya pagaste y sigue en rojo? Re-verificar estado</span>`;
+          if (window.lucide) lucide.createIcons();
+        }
+      } catch (e) {
+        btnRecheck.disabled = false;
+        btnRecheck.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>¿Ya pagaste y sigue en rojo? Re-verificar estado</span>`;
+      }
+    });
+  }
+
+  // Opción: Pagar en Efectivo en Cancha
+  const btnCash = document.getElementById('btn-choose-cash');
+  if (btnCash) {
+    btnCash.addEventListener('click', async () => {
+      if (!currentPayingPlayer) return;
+      btnCash.disabled = true;
+      btnCash.innerHTML = `<span class="inline-block animate-spin mr-1">⏳</span> Registrando...`;
+
+      try {
+        const res = await fetch('/api/player/cash-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId: currentPayingPlayer.id })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          closePayModal();
+          showToast('¡Avisaste pago en efectivo en cancha! Tu botón queda en amarillo 🟡', '💵');
+          applyRemoteData(data.match);
+        } else {
+          showToast(data.message || 'Error al registrar pago en efectivo', '⚠️');
+          btnCash.disabled = false;
+          btnCash.innerHTML = `<i data-lucide="banknote" class="w-4 h-4 text-amber-400"></i><span>Pagaré en Efectivo en la Cancha 💵</span>`;
+          if (window.lucide) lucide.createIcons();
+        }
+      } catch (e) {
+        btnCash.disabled = false;
+        btnCash.innerHTML = `<i data-lucide="banknote" class="w-4 h-4 text-amber-400"></i><span>Pagaré en Efectivo en la Cancha 💵</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', initApp);
